@@ -1,181 +1,175 @@
-# backend/main.py (모든 기능이 포함된 최종 통합 버전)
+# backend/main.py
 
-import os
-import re
-import json
-import time
+import asyncio
 import logging
 from typing import List, Dict, Optional
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import asyncio
 
-import requests
-import feedparser
-from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict
 
-# --- 1. 필요한 모듈 ---
+# --- 1. 프로젝트 모듈 import ---
+# 이제 외부 파일을 정상적으로 다시 참조합니다.
 from database import db
+from enhanced_news_collector import collector
 
-# --- 2. 로깅 설정 ---
+# --- 2. 로깅 및 FastAPI 앱 설정 ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 3. EnhancedNewsCollector 클래스 정의 (이제 이 파일 안에만 존재) ---
-class EnhancedNewsCollector:
-    def __init__(self):
-        self.session = requests.Session()
-        self.stats = {}
-
-    def collect_from_feed(self, feed_config):
-        feed_url = feed_config.get("feed_url")
-        source = feed_config.get("source", "Unknown")
-        logger.info(f"📡 Collecting from {source}")
-        try:
-            feed = feedparser.parse(feed_url)
-            if not feed or not feed.entries:
-                logger.warning(f"❌ No entries found for {source}")
-                return []
-
-            articles = []
-            for entry in feed.entries[:15]: # 항목 수를 15개로 제한
-                title = getattr(entry, "title", "No Title").strip()
-                link = getattr(entry, "link", "").strip()
-                if not title or not link:
-                    continue
-
-                published_str = getattr(entry, "published", datetime.now().isoformat())
-                try:
-                    import dateutil.parser
-                    published = dateutil.parser.parse(published_str).isoformat()
-                except:
-                    published = datetime.now().isoformat()
-
-                summary = getattr(entry, "summary", "")
-                articles.append({'title': title, 'link': link, 'published': published, 'source': source, 'summary': summary, 'keywords': '[]'})
-
-            logger.info(f"✅ {source}: {len(articles)} articles processed")
-            return articles
-        except Exception as e:
-            logger.error(f"❌ Failed to collect from {source}: {e}")
-            return []
-
-    def save_articles(self, articles):
-        stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
-        for article in articles:
-            try:
-                # 데이터베이스에 기사를 삽입하거나 업데이트합니다.
-                # 이 함수는 db.insert_article 내부에 로직이 이미 구현되어 있다고 가정합니다.
-                if db.insert_article(article):
-                    stats['inserted'] += 1
-                else:
-                    stats['skipped'] += 1
-            except Exception as e:
-                logger.error(f"Error saving article {article.get('link')}: {e}")
-                stats['skipped'] += 1
-        return stats
-
-    def collect_all_news(self, max_feeds: Optional[int] = None):
-        logger.info("🚀 Starting comprehensive news collection")
-        self.stats = {'total_processed': 0, 'total_inserted': 0, 'total_updated': 0, 'total_skipped': 0, 'failed_feeds': [], 'successful_feeds': []}
-        start_time = time.time()
-
-        # 소스 코드에 있던 전체 FEEDS 리스트
-        FEEDS = [
-            {"feed_url": "https://it.donga.com/feeds/rss/", "source": "IT동아"},
-            {"feed_url": "https://rss.etnews.com/Section902.xml", "source": "전자신문_속보"},
-            {"feed_url": "https://www.bloter.net/feed", "source": "Bloter"},
-            {"feed_url": "https://byline.network/feed/", "source": "Byline Network"},
-            {"feed_url": "https://platum.kr/feed", "source": "Platum"},
-            {"feed_url": "https://techcrunch.com/feed/", "source": "TechCrunch"},
-            {"feed_url": "https://www.theverge.com/rss/index.xml", "source": "The Verge"},
-        ]
-        feeds_to_process = FEEDS[:max_feeds] if max_feeds else FEEDS
-
-        all_articles = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(self.collect_from_feed, feed) for feed in feeds_to_process]
-            for future in as_completed(futures):
-                all_articles.extend(future.result())
-
-        unique_articles = list({article['link']: article for article in all_articles}.values())
-        logger.info(f"📊 Collected {len(unique_articles)} unique articles")
-
-        if unique_articles:
-            save_stats = self.save_articles(unique_articles)
-            self.stats.update(save_stats)
-
-        duration = time.time() - start_time
-        return {'status': 'success', 'duration': duration, 'stats': self.stats}
-
-# --- 4. FastAPI 앱 설정 ---
-app = FastAPI(title="News IT's Issue API")
-collector = EnhancedNewsCollector() # 통합된 클래스로 인스턴스 생성
+app = FastAPI(
+    title="뉴스있슈~ API (News IT's Issue)",
+    description="IT/공학 뉴스 수집, 분석, 시각화 플랫폼",
+    version="2.2.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],  # 모든 출처 허용
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# --- 3. 데이터베이스 초기화 ---
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 API Server starting up...")
+    """서버 시작 시 데이터베이스를 초기화합니다."""
+    logger.info("🚀 API 서버가 시작됩니다...")
     try:
         db.init_database()
-        logger.info("✅ Database initialized successfully.")
+        logger.info("✅ 데이터베이스가 성공적으로 초기화되었습니다.")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"❌ 데이터베이스 초기화 실패: {e}")
 
-# --- 5. 모든 API 엔드포인트 정의 ---
-@app.get("/api/articles")
-async def get_articles(limit: int = 100, offset: int = 0):
+# --- 4. Pydantic 데이터 모델 정의 ---
+# 프론트엔드와 통신할 데이터의 형식을 엄격하게 정의합니다.
+
+class Article(BaseModel):
+    id: int
+    title: str
+    link: str
+    published: str
+    source: str
+    summary: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    is_favorite: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+class KeywordStat(BaseModel):
+    keyword: str
+    count: int
+
+class NetworkNode(BaseModel):
+    id: str
+    label: str
+    value: int
+
+class NetworkEdge(BaseModel):
+    source: str
+    target: str
+    value: int
+
+class NetworkData(BaseModel):
+    nodes: List[NetworkNode]
+    edges: List[NetworkEdge]
+
+class FavoriteRequest(BaseModel):
+    article_id: int
+
+# --- 5. API 엔드포인트 복원 및 개선 ---
+
+@app.get("/api/articles", response_model=List[Article])
+async def get_articles(
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
+    source: Optional[str] = None,
+    search: Optional[str] = None,
+    favorites_only: bool = False
+):
+    """모든 뉴스 기사 목록을 필터링과 함께 조회합니다."""
     try:
-        return db.get_articles_with_filters(limit=limit, offset=offset)
+        return db.get_articles_with_filters(
+            limit=limit, offset=offset, source=source,
+            search=search, favorites_only=favorites_only
+        )
     except Exception as e:
-        logger.error(f"Error fetching articles: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch articles.")
+        logger.error(f"기사 조회 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="기사 조회 중 오류가 발생했습니다.")
 
-@app.get("/api/sources")
+@app.get("/api/sources", response_model=List[str])
 async def get_sources():
+    """수집된 모든 뉴스 출처 목록을 조회합니다."""
     try:
-        query = "SELECT DISTINCT source FROM articles ORDER BY source"
-        results = db.execute_query(query)
-        return [row['source'] for row in results]
+        return db.get_all_sources()
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to fetch sources.")
+        logger.error(f"뉴스 출처 조회 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="뉴스 출처 조회 중 오류가 발생했습니다.")
 
-@app.get("/api/keywords/stats")
-async def get_keyword_stats(limit: int = 50):
+@app.get("/api/keywords/stats", response_model=List[KeywordStat])
+async def get_keyword_stats(limit: int = Query(50, le=200)):
+    """가장 많이 등장한 키워드 통계를 조회합니다."""
     try:
         return db.get_keyword_stats(limit)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get keyword stats.")
+        logger.error(f"키워드 통계 조회 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="키워드 통계 조회 중 오류가 발생했습니다.")
+
+@app.get("/api/keywords/network", response_model=NetworkData)
+async def get_keyword_network(limit: int = Query(30, le=100)):
+    """키워드 관계 네트워크 데이터를 조회합니다."""
+    try:
+        return db.get_keyword_network_data(limit)
+    except Exception as e:
+        logger.error(f"키워드 네트워크 조회 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="키워드 네트워크 데이터 생성 중 오류가 발생했습니다.")
+
+@app.post("/api/favorites/add")
+async def add_favorite(request: FavoriteRequest):
+    """특정 기사를 즐겨찾기에 추가합니다."""
+    try:
+        db.add_favorite(request.article_id)
+        return {"status": "success", "message": "즐겨찾기에 추가되었습니다."}
+    except Exception as e:
+        logger.error(f"즐겨찾기 추가 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="즐겨찾기 추가 중 오류가 발생했습니다.")
+
+@app.delete("/api/favorites/remove/{article_id}")
+async def remove_favorite(article_id: int):
+    """특정 기사를 즐겨찾기에서 제거합니다."""
+    try:
+        db.remove_favorite(article_id)
+        return {"status": "success", "message": "즐겨찾기에서 제거되었습니다."}
+    except Exception as e:
+        logger.error(f"즐겨찾기 제거 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="즐겨찾기 제거 중 오류가 발생했습니다.")
 
 @app.post("/api/collect-news-now")
 async def collect_news_now(max_feeds: Optional[int] = Query(None)):
+    """즉시 뉴스 수집을 시작하고 결과를 반환합니다."""
     try:
-        logger.info("🚀 News collection request received.")
+        logger.info("🚀 뉴스 수집 요청을 받았습니다.")
         loop = asyncio.get_event_loop()
+        # 오래 걸리는 작업을 별도의 스레드에서 실행하여 서버 차단 방지
         result = await loop.run_in_executor(None, collector.collect_all_news, max_feeds)
-
+        
         total_articles_result = db.execute_query("SELECT COUNT(*) as count FROM articles")
         total_articles = total_articles_result[0]['count'] if total_articles_result else 0
-
+        
         stats = result.get('stats', {})
         return {
-            "message": "뉴스 수집 완료", "status": "success",
-            "duration": result.get('duration'), "inserted": stats.get('inserted', 0),
-            "total_articles": total_articles
+            "message": "뉴스 수집이 완료되었습니다.",
+            "status": "success",
+            "duration": result.get('duration'),
+            "inserted": stats.get('inserted', 0),
+            "total_articles": total_articles,
         }
     except Exception as e:
-        logger.error(f"❌ News collection error: {e}", exc_info=True)
+        logger.error(f"❌ 뉴스 수집 중 심각한 오류 발생: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"뉴스 수집 중 오류 발생: {str(e)}")
 
-# 로컬 테스트용
+# 로컬 테스트용 서버 실행 코드
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
