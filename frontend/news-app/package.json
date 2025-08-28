@@ -1,7 +1,7 @@
 {
   "name": "news-itissue-webapp",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "IT/Engineering News Collection and Analysis Platform",
   "type": "module",
   "scripts": {
@@ -33,3 +33,4 @@
     "vite": "^5.2.0"
   }
 }
+
