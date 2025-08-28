@@ -62,7 +62,7 @@ if ENABLE_CORS:
     ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins,
+        allow_origins=["*"],  # 모든 주소 허용 (진단용)
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -857,4 +857,5 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
