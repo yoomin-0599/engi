@@ -12,7 +12,7 @@ services:
       
       # Frontend build
       cd ../frontend/news-app
-      npm install
+      npm install --legacy-peer-deps
       npm run build
       
     startCommand: |
@@ -35,4 +35,5 @@ databases:
     databaseName: newsdb
 
     user: newsuser
+
 
