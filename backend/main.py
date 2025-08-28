@@ -1,3 +1,122 @@
+import os
+import re
+import json
+import time
+import logging
+from typing import List, Dict, Optional, Set
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+import asyncio
+
+import requests
+import feedparser
+from bs4 import BeautifulSoup
+
+from database import db
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "15"))
+MAX_TOTAL_PER_SOURCE = int(os.getenv("MAX_TOTAL_PER_SOURCE", "200"))
+RSS_BACKFILL_PAGES = int(os.getenv("RSS_BACKFILL_PAGES", "3"))
+CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "10.0"))
+READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "15.0"))
+ENABLE_HTTP_CACHE = os.getenv("ENABLE_HTTP_CACHE", "true").lower() == "true"
+PARALLEL_MAX_WORKERS = int(os.getenv("PARALLEL_MAX_WORKERS", "8"))
+SKIP_UPDATE_IF_EXISTS = os.getenv("SKIP_UPDATE_IF_EXISTS", "true").lower() == "true"
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (NewsAgent/2.0; +https://github.com/newsbot)"}
+SESSION = requests.Session()
+
+class EnhancedNewsCollector:
+    def __init__(self):
+        self.session = SESSION
+        self.stats = {'total_processed': 0, 'total_inserted': 0, 'total_updated': 0, 'total_skipped': 0, 'failed_feeds': [], 'successful_feeds': []}
+
+    def canonicalize_link(self, url: str) -> str:
+        try:
+            u = urlparse(url); scheme = (u.scheme or "https").lower(); netloc = (u.netloc or "").lower(); path = (u.path or "").rstrip("/")
+            drop_params = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "gclid", "fbclid", "igshid", "spm", "ref", "ref_src", "cmpid", "source"}
+            qs = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k.lower() not in drop_params]
+            query = urlencode(qs, doseq=True)
+            return urlunparse((scheme, netloc, path, u.params, query, ""))
+        except Exception as e:
+            logger.warning(f"URL canonicalization failed for {url}: {e}"); return url
+
+    def process_entry(self, entry, source, category, language):
+        try:
+            title = getattr(entry, "title", "").strip(); link = self.canonicalize_link(getattr(entry, "link", "").strip())
+            if not title or not link: return None
+
+            published = getattr(entry, "published", "") or getattr(entry, "updated", "")
+            if not published: published = datetime.now().isoformat()
+            else:
+                try:
+                    import dateutil.parser; parsed_date = dateutil.parser.parse(published); published = parsed_date.isoformat()
+                except: published = datetime.now().isoformat()
+
+            summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
+            return {'title': title, 'link': link, 'published': published, 'source': source, 'summary': summary, 'keywords': [], 'category': category, 'language': language}
+        except Exception as e:
+            logger.error(f"Error processing entry from {source}: {e}"); return None
+
+    def collect_from_feed(self, feed_config):
+        feed_url, source, category, language = feed_config.get("feed_url"), feed_config.get("source", "Unknown"), feed_config.get("category", "News"), feed_config.get("lang", "en")
+        if not feed_url: return []
+        try:
+            logger.info(f"📡 Collecting from {source}"); feed = feedparser.parse(feed_url)
+            if not (feed and feed.entries): logger.warning(f"❌ No entries found for {source}"); self.stats['failed_feeds'].append(source); return []
+
+            articles = [self.process_entry(entry, source, category, language) for entry in feed.entries[:MAX_RESULTS]]
+            articles = [a for a in articles if a]
+
+            logger.info(f"✅ {source}: {len(articles)} articles processed"); self.stats['successful_feeds'].append(source)
+            return articles
+        except Exception as e:
+            logger.error(f"❌ Failed to collect from {source}: {e}"); self.stats['failed_feeds'].append(source); return []
+
+    def save_articles(self, articles):
+        if not articles: return {'inserted': 0, 'updated': 0, 'skipped': 0}
+        stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
+        for article in articles:
+            try:
+                if db.insert_article(article): stats['inserted'] += 1
+                else: stats['skipped'] += 1
+            except Exception as e:
+                logger.error(f"Error saving article: {e}"); stats['skipped'] += 1
+        return stats
+
+    def collect_all_news(self, max_feeds: Optional[int] = None):
+        logger.info("🚀 Starting comprehensive news collection")
+        self.stats = {'total_processed': 0, 'total_inserted': 0, 'total_updated': 0, 'total_skipped': 0, 'failed_feeds': [], 'successful_feeds': []}
+        start_time = time.time()
+        FEEDS = [{"feed_url": "https://it.donga.com/feeds/rss/", "source": "IT동아"}, {"feed_url": "https://rss.etnews.com/Section902.xml", "source": "전자신문_속보"}] # Example feeds
+        feeds_to_process = FEEDS[:max_feeds] if max_feeds else FEEDS
+
+        all_articles = []; 
+        with ThreadPoolExecutor(max_workers=PARALLEL_MAX_WORKERS) as executor:
+            futures = [executor.submit(self.collect_from_feed, feed) for feed in feeds_to_process]
+            for future in as_completed(futures): all_articles.extend(future.result())
+
+        unique_articles = {a['link']: a for a in all_articles}.values()
+        logger.info(f"📊 Collected {len(unique_articles)} unique articles")
+
+        if unique_articles:
+            save_stats = self.save_articles(list(unique_articles))
+            self.stats.update(save_stats)
+            self.stats['total_processed'] = len(unique_articles)
+
+        duration = time.time() - start_time
+        logger.info(f"✅ Collection completed in {duration:.2f} seconds"); logger.info(f"📈 Stats: {self.stats}")
+        return {'success': True, 'duration': duration, 'stats': self.stats, 'total_feeds': len(feeds_to_process), 'successful_feeds': len(self.stats['successful_feeds']), 'failed_feeds': len(self.stats['failed_feeds'])}
+
+collector = EnhancedNewsCollector()
+
+
+
+
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -867,6 +986,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
