@@ -1,4 +1,4 @@
-// frontend/news-app/src/App.tsx (모든 기능이 복원된 최종 버전)
+// frontend/news-app/src/App.tsx (빌드 오류가 수정된 최종 버전)
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -69,7 +69,12 @@ function ArticleCard({ article, onToggleFavorite }: { article: Article, onToggle
             </Box>
           </Box>
           <Stack spacing={0.5}>
-            <Tooltip title={article.is_favorite ? "즐겨찾기 해제" : "즐겨찾기 추가"}><IconButton onClick={() => onToggleFavorite(article.id)} color={article.is_favorite ? "error" : "default"}><{article.is_favorite ? "Favorite" : "FavoriteBorder"} /></IconButton></Tooltip>
+            <Tooltip title={article.is_favorite ? "즐겨찾기 해제" : "즐겨찾기 추가"}>
+              <IconButton onClick={() => onToggleFavorite(article.id)} color={article.is_favorite ? "error" : "default"}>
+                {/* [수정된 부분] JSX 문법 오류 수정 */}
+                {article.is_favorite ? <Favorite /> : <FavoriteBorder />}
+              </IconButton>
+            </Tooltip>
             <Tooltip title="번역 (기능 준비중)"><IconButton disabled><TranslateIcon /></IconButton></Tooltip>
           </Stack>
         </Stack>
