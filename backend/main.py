@@ -58,7 +58,7 @@ ENABLE_CORS = os.getenv("ENABLE_CORS", "true").lower() == "true"
 if ENABLE_CORS:
     origins = [
     "http://localhost:5173",  # 로컬 개발 환경
-    "https://enginews.netlify.app/",
+    "https://enginews.netlify.app",
     ]
     app.add_middleware(
         CORSMiddleware,
@@ -857,3 +857,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
