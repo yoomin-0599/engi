@@ -573,6 +573,15 @@ async def collect_news_now(
         
         if ENHANCED_MODULES_AVAILABLE:
             logger.info("🚀 Starting enhanced news collection")
+
+            # --- 최종 진단 코드 시작 ---
+            # collector 객체가 실제로 어떤 함수들을 가지고 있는지 확인합니다.
+            try:
+                available_methods = [method for method in dir(collector) if not method.startswith('_')]
+                logger.info(f"✅ Collector가 실제로 가진 함수 목록: {available_methods}")
+            except Exception as inspect_e:
+                logger.error(f"🔍 Collector 객체 검사 중 오류 발생: {inspect_e}")
+                
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, collector.collect_all_news, max_feeds)
             
@@ -858,6 +867,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
