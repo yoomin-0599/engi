@@ -1,4 +1,4 @@
-# backend/database.py (모든 기능이 복원되고 안정화된 최종 버전)
+# backend/database.py (모든 기능이 포함된 최종 버전)
 
 import json
 import logging
@@ -9,7 +9,6 @@ from typing import Dict, List
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Render의 임시 저장소(/tmp) 또는 로컬 경로를 기본값으로 사용
 DB_PATH = os.getenv("SQLITE_PATH", "news.db")
 
 class Database:
@@ -25,41 +24,35 @@ class Database:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
+        """[복원된 함수] SELECT 쿼리를 실행하고 결과를 딕셔너리 리스트로 반환합니다."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        finally:
+            conn.close()
+
     def init_database(self):
         """프로젝트에 필요한 모든 테이블을 생성합니다."""
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            # 기사 정보를 저장할 메인 테이블
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS articles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    link TEXT UNIQUE NOT NULL,
-                    published TEXT,
-                    source TEXT,
-                    summary TEXT,
-                    keywords TEXT, -- 키워드를 JSON 형식의 문자열로 저장
-                    raw_text TEXT, -- 본문 저장을 위해 추가
-                    category TEXT,
-                    language TEXT,
+                    title TEXT NOT NULL, link TEXT UNIQUE NOT NULL, published TEXT,
+                    source TEXT, summary TEXT, keywords TEXT, raw_text TEXT,
+                    category TEXT, language TEXT,
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 )
             """)
-            # 즐겨찾기한 기사의 ID를 저장할 테이블
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS favorites (
                     article_id INTEGER UNIQUE,
                     FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE
-                )
-            """)
-            # 컬렉션 테이블 (원본 기능 복원)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS collections (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    description TEXT,
-                    rules TEXT
                 )
             """)
             conn.commit()
@@ -74,7 +67,6 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM articles WHERE link = ?", (article['link'],))
             existing = cursor.fetchone()
-
             keywords_json = json.dumps(article.get('keywords', []))
 
             if existing:
@@ -93,7 +85,6 @@ class Database:
                     article.get('raw_text', ''), article.get('category', ''), article.get('language', '')
                 ))
                 result = "inserted"
-            
             conn.commit()
             return result
         finally:
@@ -104,16 +95,11 @@ class Database:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            query = """
-                SELECT a.*, CASE WHEN f.article_id IS NOT NULL THEN 1 ELSE 0 END as is_favorite
-                FROM articles a LEFT JOIN favorites f ON a.id = f.article_id
-            """
+            query = "SELECT a.*, CASE WHEN f.article_id IS NOT NULL THEN 1 ELSE 0 END as is_favorite FROM articles a LEFT JOIN favorites f ON a.id = f.article_id"
             conditions, params = [], []
 
-            if filters.get('favorites_only'):
-                conditions.append("f.article_id IS NOT NULL")
-            if filters.get('source'):
-                conditions.append("a.source = ?"); params.append(filters['source'])
+            if filters.get('favorites_only'): conditions.append("f.article_id IS NOT NULL")
+            if filters.get('source'): conditions.append("a.source = ?"); params.append(filters['source'])
             if filters.get('search'):
                 search_term = f"%{filters['search']}%"
                 conditions.append("(a.title LIKE ? OR a.summary LIKE ? OR a.keywords LIKE ?)")
@@ -154,6 +140,28 @@ class Database:
                 except: continue
             sorted_keywords = sorted(keyword_counts.items(), key=lambda item: item[1], reverse=True)
             return [{"keyword": k, "count": v} for k, v in sorted_keywords[:limit]]
+        finally:
+            conn.close()
+            
+    def get_keyword_network_data(self, limit: int) -> Dict:
+        stats = self.get_keyword_stats(limit)
+        top_keywords = {stat['keyword'] for stat in stats}
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor(); cursor.execute("SELECT keywords FROM articles WHERE keywords IS NOT NULL AND keywords != '[]'")
+            co_occurrence = {}
+            for row in cursor.fetchall():
+                try:
+                    keywords = json.loads(row['keywords'])
+                    filtered_keywords = [kw for kw in keywords if kw in top_keywords]
+                    for i in range(len(filtered_keywords)):
+                        for j in range(i + 1, len(filtered_keywords)):
+                            pair = tuple(sorted((filtered_keywords[i], filtered_keywords[j])))
+                            co_occurrence[pair] = co_occurrence.get(pair, 0) + 1
+                except: continue
+            nodes = [{"id": stat['keyword'], "label": stat['keyword'], "value": stat['count']} for stat in stats]
+            edges = [{"source": pair[0], "target": pair[1], "value": weight} for pair, weight in co_occurrence.items() if weight > 1]
+            return {"nodes": nodes, "edges": edges}
         finally:
             conn.close()
 
