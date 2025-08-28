@@ -573,7 +573,8 @@ async def collect_news_now(
         
         if ENHANCED_MODULES_AVAILABLE:
             logger.info("🚀 Starting enhanced news collection")
-            result = await collect_news_async(max_feeds)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, collector.collect_all_news, max_feeds)
             
             # Get updated statistics
             try:
@@ -857,6 +858,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
