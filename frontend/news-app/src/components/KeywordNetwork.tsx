@@ -12,9 +12,9 @@ export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || !data || !data.nodes.length) {
-        // 데이터가 없으면 캔버스를 그리지 않고 메시지를 표시할 수 있도록 컨테이너를 비웁니다.
-        if (containerRef.current) containerRef.current.innerHTML = '';
+    // 데이터가 없거나, 노드 또는 엣지가 없으면 캔버스를 그리지 않습니다.
+    if (!containerRef.current || !data || !data.nodes.length || !data.edges.length) {
+        if (containerRef.current) containerRef.current.innerHTML = ''; // 이전 캔버스 정리
         return;
     }
 
@@ -43,7 +43,7 @@ export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
       ctx.clearRect(0, 0, width, height);
 
       // 1. 연결선(Edges) 그리기
-      ctx.strokeStyle = '#e0e0e0'; // 연한 회색으로 변경
+      ctx.strokeStyle = '#e0e0e0';
       ctx.lineWidth = 1;
       data.edges.forEach(edge => {
         // [수정] 백엔드 데이터 형식(source, target)에 맞춤
@@ -62,13 +62,13 @@ export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
         const radius = Math.max(Math.sqrt(node.value) * 2.5, 5); // 최소 반지름 보장
         
         // 원 그리기
-        ctx.fillStyle = '#1976d2'; // MUI Primary 색상
+        ctx.fillStyle = theme.palette.primary.main; // 테마 색상 사용
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
         ctx.fill();
 
         // 텍스트 레이블
-        ctx.fillStyle = '#212121'; // 어두운 글자색
+        ctx.fillStyle = theme.palette.text.primary;
         ctx.font = '12px "Roboto", sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(node.label, node.x, node.y - radius - 5);
@@ -77,13 +77,17 @@ export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
 
     drawNetwork();
 
-  }, [data]); // 데이터가 변경될 때마다 다시 그립니다.
+  }, [data, theme]); // 데이터나 테마가 변경될 때마다 다시 그립니다.
 
-  if (!data || !data.nodes || data.nodes.length === 0) {
+  // 테마를 가져오기 위해 useTheme 훅 사용
+  const { theme } = useThemeProvider();
+
+
+  if (!data || !data.nodes.length || !data.edges.length) {
     return (
         <Paper sx={{ p: 3, height: 500, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Typography color="text.secondary">
-                네트워크를 표시할 데이터가 없습니다.
+                키워드 연결 데이터가 부족합니다.
             </Typography>
         </Paper>
     );
@@ -98,3 +102,6 @@ export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
     </Paper>
   );
 };
+
+// 테마를 사용하기 위해 useThemeProvider 임포트 필요
+import { useThemeProvider } from '../hooks/useTheme';
