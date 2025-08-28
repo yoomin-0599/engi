@@ -1,111 +1,100 @@
+// frontend/news-app/src/components/KeywordNetwork.tsx
+
 import React, { useEffect, useRef } from 'react';
-import { Paper, Typography } from '@mui/material';
+import { Paper, Typography, Box } from '@mui/material';
 import type { NetworkData } from '../api/newsApi';
 
 interface KeywordNetworkProps {
-  data: NetworkData;
+  data?: NetworkData;
 }
 
 export const KeywordNetwork: React.FC<KeywordNetworkProps> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || !data.nodes.length) return;
+    if (!containerRef.current || !data || !data.nodes.length) {
+        // 데이터가 없으면 캔버스를 그리지 않고 메시지를 표시할 수 있도록 컨테이너를 비웁니다.
+        if (containerRef.current) containerRef.current.innerHTML = '';
+        return;
+    }
 
-    // Simple D3-like network visualization using canvas
+    // Canvas를 이용한 D3-like 네트워크 시각화 (라이브러리 의존성 없음)
     const container = containerRef.current;
     const canvas = document.createElement('canvas');
     const width = container.offsetWidth;
-    const height = 500;
+    const height = 500; // 고정 높이
     canvas.width = width;
     canvas.height = height;
-    container.innerHTML = '';
+    container.innerHTML = ''; // 이전 캔버스 초기화
     container.appendChild(canvas);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Simple force-directed layout
+    // 노드 초기 위치 설정
     const nodes = data.nodes.map((node) => ({
       ...node,
       x: Math.random() * width,
       y: Math.random() * height,
-      vx: 0,
-      vy: 0,
     }));
 
-    const simulation = () => {
-      // Clear canvas
+    // 그리기 함수
+    const drawNetwork = () => {
       ctx.clearRect(0, 0, width, height);
 
-      // Draw edges
-      ctx.strokeStyle = '#ddd';
+      // 1. 연결선(Edges) 그리기
+      ctx.strokeStyle = '#e0e0e0'; // 연한 회색으로 변경
       ctx.lineWidth = 1;
       data.edges.forEach(edge => {
-        const source = nodes.find(n => n.id === edge.from);
-        const target = nodes.find(n => n.id === edge.to);
-        if (source && target) {
+        // [수정] 백엔드 데이터 형식(source, target)에 맞춤
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        const targetNode = nodes.find(n => n.id === edge.target);
+        if (sourceNode && targetNode) {
           ctx.beginPath();
-          ctx.moveTo(source.x, source.y);
-          ctx.lineTo(target.x, target.y);
+          ctx.moveTo(sourceNode.x, sourceNode.y);
+          ctx.lineTo(targetNode.x, targetNode.y);
           ctx.stroke();
         }
       });
 
-      // Draw nodes
-      nodes.forEach((node: any) => {
-        const radius = Math.sqrt(node.value) * 3;
+      // 2. 노드(Nodes) 그리기
+      nodes.forEach((node) => {
+        const radius = Math.max(Math.sqrt(node.value) * 2.5, 5); // 최소 반지름 보장
         
-        // Node circle
-        ctx.fillStyle = '#1976d2';
+        // 원 그리기
+        ctx.fillStyle = '#1976d2'; // MUI Primary 색상
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
         ctx.fill();
 
-        // Node label
-        ctx.fillStyle = '#333';
-        ctx.font = '12px sans-serif';
+        // 텍스트 레이블
+        ctx.fillStyle = '#212121'; // 어두운 글자색
+        ctx.font = '12px "Roboto", sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(node.label, node.x, node.y - radius - 5);
       });
     };
 
-    simulation();
+    drawNetwork();
 
-    // Simple interaction
-    canvas.addEventListener('mousemove', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+  }, [data]); // 데이터가 변경될 때마다 다시 그립니다.
 
-      // Find nearest node
-      let nearestNode: any = null;
-      let minDist = Infinity;
-      nodes.forEach((node: any) => {
-        const dist = Math.sqrt(Math.pow(node.x - x, 2) + Math.pow(node.y - y, 2));
-        if (dist < minDist && dist < Math.sqrt(node.value) * 3) {
-          minDist = dist;
-          nearestNode = node;
-        }
-      });
-
-      if (nearestNode) {
-        canvas.style.cursor = 'pointer';
-        canvas.title = `${nearestNode.label} (${nearestNode.value})`;
-      } else {
-        canvas.style.cursor = 'default';
-        canvas.title = '';
-      }
-    });
-
-  }, [data]);
+  if (!data || !data.nodes || data.nodes.length === 0) {
+    return (
+        <Paper sx={{ p: 3, height: 500, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Typography color="text.secondary">
+                네트워크를 표시할 데이터가 없습니다.
+            </Typography>
+        </Paper>
+    );
+  }
 
   return (
     <Paper sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom>
         키워드 네트워크
       </Typography>
-      <div ref={containerRef} style={{ minHeight: 500 }} />
+      <div ref={containerRef} style={{ minHeight: 500, width: '100%' }} />
     </Paper>
   );
 };
