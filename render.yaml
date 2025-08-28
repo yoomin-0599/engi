@@ -1,6 +1,7 @@
 services:
   - type: web
     name: streamlit-04
+    plan: free
     env: python
     runtime: python
     buildCommand: |
@@ -30,6 +31,8 @@ services:
 
 databases:
   - name: news-postgres
+    plan: free
     databaseName: newsdb
 
     user: newsuser
+
