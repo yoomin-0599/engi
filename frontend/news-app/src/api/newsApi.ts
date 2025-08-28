@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { API_BASE_URL } from '../config';
+//import { API_BASE_URL } from '../config';
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: "https://streamlit-04-j6ho.onrender.com",
   headers: {
     'Content-Type': 'application/json',
   },
@@ -174,4 +174,5 @@ export const newsApi = {
     const response = await api.post(`/api/translate/${articleId}`);
     return response.data;
   },
+
 };
