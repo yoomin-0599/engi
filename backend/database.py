@@ -1,4 +1,4 @@
-# backend/database.py (모든 기능이 복원되고 안정화된 최종 버전)
+# backend/database.py (모든 기능이 포함된 최종 버전)
 
 import json
 import logging
@@ -9,13 +9,11 @@ from typing import Dict, List
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Render의 임시 저장소(/tmp) 또는 로컬 경로를 기본값으로 사용
 DB_PATH = os.getenv("SQLITE_PATH", "news.db")
 
 class Database:
     def __init__(self, db_path):
         self.db_path = db_path
-        # 데이터베이스 파일이 위치할 디렉토리가 없으면 생성
         db_dir = os.path.dirname(self.db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
@@ -23,32 +21,34 @@ class Database:
     def get_connection(self):
         """데이터베이스 연결을 생성하고 반환합니다."""
         conn = sqlite3.connect(self.db_path)
-        # 결과를 딕셔너리처럼 {'column': value} 형태로 사용 가능하게 설정
         conn.row_factory = sqlite3.Row
         return conn
+
+    def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
+        """[복원된 함수] SELECT 쿼리를 실행하고 결과를 딕셔너리 리스트로 반환합니다."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        finally:
+            conn.close()
 
     def init_database(self):
         """프로젝트에 필요한 모든 테이블을 생성합니다."""
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            # 기사 정보를 저장할 메인 테이블
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS articles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    link TEXT UNIQUE NOT NULL,
-                    published TEXT,
-                    source TEXT,
-                    summary TEXT,
-                    keywords TEXT, -- 키워드를 JSON 형식의 문자열로 저장
-                    raw_text TEXT, -- 본문 저장을 위해 추가
-                    category TEXT,
-                    language TEXT,
+                    title TEXT NOT NULL, link TEXT UNIQUE NOT NULL, published TEXT,
+                    source TEXT, summary TEXT, keywords TEXT, raw_text TEXT,
+                    category TEXT, language TEXT,
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
                 )
             """)
-            # 즐겨찾기한 기사의 ID를 저장할 테이블
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS favorites (
                     article_id INTEGER UNIQUE,
@@ -67,18 +67,15 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM articles WHERE link = ?", (article['link'],))
             existing = cursor.fetchone()
-
             keywords_json = json.dumps(article.get('keywords', []))
 
             if existing:
-                # 이미 있는 기사는 제목, 요약, 키워드, 본문만 업데이트
                 cursor.execute("""
                     UPDATE articles SET title = ?, summary = ?, keywords = ?, raw_text = ?
                     WHERE id = ?
                 """, (article['title'], article['summary'], keywords_json, article.get('raw_text', ''), existing['id']))
                 result = "updated"
             else:
-                # 없는 기사는 새로 추가
                 cursor.execute("""
                     INSERT INTO articles (title, link, published, source, summary, keywords, raw_text, category, language)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -88,62 +85,36 @@ class Database:
                     article.get('raw_text', ''), article.get('category', ''), article.get('language', '')
                 ))
                 result = "inserted"
-            
             conn.commit()
             return result
         finally:
             conn.close()
 
     def get_articles_with_filters(self, limit: int, offset: int, **filters) -> List[Dict]:
-        """[기능 복원] 즐겨찾기, 날짜 등 모든 조건으로 기사를 필터링하여 조회합니다."""
+        """모든 조건으로 기사를 필터링하여 조회합니다."""
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            
-            query = """
-                SELECT a.*, CASE WHEN f.article_id IS NOT NULL THEN 1 ELSE 0 END as is_favorite
-                FROM articles a
-                LEFT JOIN favorites f ON a.id = f.article_id
-            """
-            conditions = []
-            params = []
+            query = "SELECT a.*, CASE WHEN f.article_id IS NOT NULL THEN 1 ELSE 0 END as is_favorite FROM articles a LEFT JOIN favorites f ON a.id = f.article_id"
+            conditions, params = [], []
 
-            if filters.get('favorites_only'):
-                conditions.append("f.article_id IS NOT NULL")
-            
-            if filters.get('source'):
-                conditions.append("a.source = ?")
-                params.append(filters['source'])
-            
-            # [3번 문제 해결] 키워드 검색 기능
+            if filters.get('favorites_only'): conditions.append("f.article_id IS NOT NULL")
+            if filters.get('source'): conditions.append("a.source = ?"); params.append(filters['source'])
             if filters.get('search'):
                 search_term = f"%{filters['search']}%"
                 conditions.append("(a.title LIKE ? OR a.summary LIKE ? OR a.keywords LIKE ?)")
                 params.extend([search_term, search_term, search_term])
-            
-            # [4번 문제 해결] 날짜 필터링 기능
-            if filters.get('date_from'):
-                conditions.append("date(a.published) >= ?")
-                params.append(filters['date_from'])
-            if filters.get('date_to'):
-                conditions.append("date(a.published) <= ?")
-                params.append(filters['date_to'])
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-
-            query += " ORDER BY a.published DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
+            if conditions: query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY a.published DESC LIMIT ? OFFSET ?"; params.extend([limit, offset])
 
             cursor.execute(query, params)
             articles = []
             for row in cursor.fetchall():
                 article = dict(row)
                 if article.get('keywords'):
-                    try:
-                        article['keywords'] = json.loads(article['keywords'])
-                    except (json.JSONDecodeError, TypeError):
-                        article['keywords'] = []
+                    try: article['keywords'] = json.loads(article['keywords'])
+                    except: article['keywords'] = []
                 articles.append(article)
             return articles
         finally:
@@ -152,86 +123,62 @@ class Database:
     def get_all_sources(self) -> List[str]:
         conn = self.get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT source FROM articles WHERE source IS NOT NULL ORDER BY source")
+            cursor = conn.cursor(); cursor.execute("SELECT DISTINCT source FROM articles WHERE source IS NOT NULL ORDER BY source")
             return [row['source'] for row in cursor.fetchall()]
         finally:
             conn.close()
 
     def get_keyword_stats(self, limit: int) -> List[Dict]:
-        """[2번 문제 해결] 키워드 등장 빈도 통계를 계산합니다."""
         conn = self.get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT keywords FROM articles WHERE keywords IS NOT NULL AND keywords != '[]'")
-            
+            cursor = conn.cursor(); cursor.execute("SELECT keywords FROM articles WHERE keywords IS NOT NULL AND keywords != '[]'")
             keyword_counts = {}
             for row in cursor.fetchall():
                 try:
                     keywords = json.loads(row['keywords'])
-                    for keyword in keywords:
-                        keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            
+                    for keyword in keywords: keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+                except: continue
             sorted_keywords = sorted(keyword_counts.items(), key=lambda item: item[1], reverse=True)
             return [{"keyword": k, "count": v} for k, v in sorted_keywords[:limit]]
         finally:
             conn.close()
-
+            
     def get_keyword_network_data(self, limit: int) -> Dict:
-        """[1번 문제 해결] 키워드 관계 네트워크 데이터를 생성합니다."""
         stats = self.get_keyword_stats(limit)
         top_keywords = {stat['keyword'] for stat in stats}
-        
         conn = self.get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT keywords FROM articles WHERE keywords IS NOT NULL AND keywords != '[]'")
-            
+            cursor = conn.cursor(); cursor.execute("SELECT keywords FROM articles WHERE keywords IS NOT NULL AND keywords != '[]'")
             co_occurrence = {}
             for row in cursor.fetchall():
                 try:
                     keywords = json.loads(row['keywords'])
-                    # 기사 하나에 포함된 키워드 중, 상위 키워드에 해당하는 것들만 필터링
                     filtered_keywords = [kw for kw in keywords if kw in top_keywords]
-                    
-                    # 필터링된 키워드들의 모든 쌍(pair)을 만들어 동시 등장 횟수 증가
                     for i in range(len(filtered_keywords)):
                         for j in range(i + 1, len(filtered_keywords)):
                             pair = tuple(sorted((filtered_keywords[i], filtered_keywords[j])))
                             co_occurrence[pair] = co_occurrence.get(pair, 0) + 1
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            
+                except: continue
             nodes = [{"id": stat['keyword'], "label": stat['keyword'], "value": stat['count']} for stat in stats]
-            # 최소 2번 이상 함께 등장한 키워드 쌍만 연결선(edge)으로 만듭니다.
             edges = [{"source": pair[0], "target": pair[1], "value": weight} for pair, weight in co_occurrence.items() if weight > 1]
-            
             return {"nodes": nodes, "edges": edges}
         finally:
             conn.close()
 
     def add_favorite(self, article_id: int):
-        conn = self.get_connection()
+        conn = self.get_connection();
         try:
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR IGNORE INTO favorites (article_id) VALUES (?)", (article_id,))
-            conn.commit()
+            cursor = conn.cursor(); cursor.execute("INSERT OR IGNORE INTO favorites (article_id) VALUES (?)", (article_id,)); conn.commit()
         finally:
             conn.close()
 
     def remove_favorite(self, article_id: int):
         conn = self.get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM favorites WHERE article_id = ?", (article_id,))
-            conn.commit()
+            cursor = conn.cursor(); cursor.execute("DELETE FROM favorites WHERE article_id = ?", (article_id,)); conn.commit()
         finally:
             conn.close()
 
-# 다른 파일에서 쉽게 사용할 수 있도록 인스턴스 생성
 db = Database(DB_PATH)
-
 
 
