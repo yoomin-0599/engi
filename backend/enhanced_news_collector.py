@@ -370,67 +370,66 @@ class EnhancedNewsCollector:
                 urls.append(f"{feed_url}{sep}paged={i}")
         return urls
     
-    def process_entry(self, entry, source: str, category: str, language: str) -> Optional[Dict]:
-        """Process individual RSS entry"""
-        try:
-            title = getattr(entry, "title", "").strip()
-            link = self.canonicalize_link(getattr(entry, "link", "").strip())
-            
-            if not title or not link:
-                return None
-            
-            # Check if already exists (if skip option is enabled)
-            if SKIP_UPDATE_IF_EXISTS:
-                existing = db.execute_query(
-                    "SELECT id FROM articles WHERE link = %s" if db.db_type == "postgresql" else 
-                    "SELECT id FROM articles WHERE link = ?", 
-                    (link,)
-                )
-                if existing:
-                    return None
-            
-            published = getattr(entry, "published", "") or getattr(entry, "updated", "")
-            if not published:
-                published = datetime.now().isoformat()
-            else:
-                try:
-                    # Parse and normalize date
-                    import dateutil.parser
-                    parsed_date = dateutil.parser.parse(published)
-                    published = parsed_date.isoformat()
-                except:
-                    published = datetime.now().isoformat()
-            
-            # Extract content
-            raw_text = self.extract_main_text(link)
-            if not raw_text:
-                raw_text = getattr(entry, "summary", "") or getattr(entry, "description", "")
-            
-            # Generate summary and keywords
-            summary = self.summarize_text(title, raw_text, source)
-            keywords = self.extract_keywords(raw_text, title)
-            
-            # Filter tech articles if enabled
-            if SKIP_NON_TECH and not self.is_tech_article(title, raw_text, keywords):
-                return None
-            
-            article_data = {
-                'title': title,
-                'link': link,
-                'published': published,
-                'source': source,
-                'raw_text': raw_text,
-                'summary': summary,
-                'keywords': keywords,
-                'category': category,
-                'language': language
-            }
-            
-            return article_data
-            
-        except Exception as e:
-            logger.error(f"Error processing entry from {source}: {e}")
+    # backend/enhanced_news_collector.py
+
+def process_entry(entry_data: Dict, source: str, session: requests.Session) -> Optional[Dict]:
+    """개별 뉴스 항목을 처리하고 데이터베이스에 저장할 형식으로 변환합니다 (오류 처리 강화)"""
+    try:
+        link = entry_data.get('link')
+        if not link:
             return None
+
+        # 이미 처리된 링크인지 확인 (메모리 기반 체크)
+        # if is_recently_processed(link):
+        #     return None
+
+        title = entry_data.get('title', 'No Title')
+        published_str = entry_data.get('published', datetime.now().isoformat())
+        published_dt = parse_published_date(published_str)
+
+        # User-Agent 추가하여 차단 방지
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        summary = None
+        # 타임아웃을 30초로 늘려서 접속 시도
+        try:
+            response = session.get(link, timeout=30, headers=headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # 메타 디스크립션 또는 본문에서 요약 추출
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc and meta_desc.get('content'):
+                summary = meta_desc.get('content')
+            else:
+                article_body = soup.find('article') or soup.find('div', class_='article-body')
+                if article_body:
+                    summary = article_body.get_text(separator=' ', strip=True)[:300] + "..."
+                else: # Fallback
+                    summary = entry_data.get('summary', '')
+
+        except requests.exceptions.RequestException as e:
+            # 타임아웃을 포함한 모든 네트워크 오류를 여기서 처리하고 넘어감
+            logger.warning(f"Could not fetch article content from {link}: {e}")
+            summary = entry_data.get('summary', '') # RSS의 기본 요약 사용
+
+        # 데이터베이스에 저장할 최종 기사 데이터
+        article_data = {
+            "title": title,
+            "link": link,
+            "published": published_dt.isoformat(),
+            "source": source,
+            "summary": summary,
+            "keywords": None, 
+        }
+        return article_data
+
+    except Exception as e:
+        # 예상치 못한 다른 모든 오류를 처리하고 넘어감
+        logger.error(f"An unexpected error occurred while processing entry {entry_data.get('link')}: {e}")
+        return None
     
     def collect_from_feed(self, feed_config: Dict) -> List[Dict]:
         """Collect articles from single feed"""
@@ -635,4 +634,5 @@ def collect_news_sync(max_feeds: Optional[int] = None) -> Dict:
 async def collect_news_async(max_feeds: Optional[int] = None) -> Dict:
     """Asynchronous news collection"""
     loop = asyncio.get_event_loop()
+
     return await loop.run_in_executor(None, collect_news_sync, max_feeds)
