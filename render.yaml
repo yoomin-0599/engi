@@ -21,19 +21,13 @@ services:
       
     envVars:
       - key: DB_TYPE
-        value: postgres
+        value: sqlite
       - key: SQLITE_PATH
-        value: /opt/render/project/src/backend/news.db
+        value: /var/data/news.db
       - key: PYTHON_VERSION
         value: "3.11.0"
       - key: OPENAI_API_KEY
         sync: false
 
-databases:
-  - name: news-postgres
-    plan: free
-    databaseName: newsdb
-
-    user: newsuser
 
 
