@@ -1,13 +1,18 @@
+// frontend/news-app/src/api/newsApi.ts (모든 기능이 포함된 최종 버전)
+
 import axios from 'axios';
-//import { API_BASE_URL } from '../config';
+
+// Netlify 환경 변수 또는 로컬 주소를 사용합니다.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const api = axios.create({
-  baseURL: "https://streamlit-04-j6ho.onrender.com",
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// --- [수정] Article 타입에 카테고리 필드 추가 ---
 export interface Article {
   id: number;
   title: string;
@@ -15,37 +20,33 @@ export interface Article {
   published: string;
   source: string;
   summary?: string;
-  keywords?: string | string[];
-  created_at?: string;
+  keywords?: string[]; // keywords는 문자열 배열로 통일
+  main_category?: string; // 대분류 필드 추가
+  sub_category?: string;  // 소분류 필드 추가
   is_favorite: boolean;
 }
 
-export interface KeywordStats {
+export interface KeywordStat {
   keyword: string;
   count: number;
 }
 
+// --- [추가] 카테고리 통계 타입 추가 ---
+export interface CategoryStat {
+    category: string;
+    count: number;
+}
+
 export interface NetworkData {
-  nodes: Array<{
-    id: string;
-    label: string;
-    value: number;
-  }>;
-  edges: Array<{
-    from: string;
-    to: string;
-    value: number;
-  }>;
+  nodes: Array<{ id: string; label: string; value: number }>;
+  edges: Array<{ source: string; target: string; value: number }>;
 }
 
 export interface Stats {
   total_articles: number;
   total_sources: number;
   total_favorites: number;
-  daily_counts: Array<{
-    date: string;
-    count: number;
-  }>;
+  daily_counts: Array<{ date: string; count: number }>;
 }
 
 export interface Collection {
@@ -54,6 +55,7 @@ export interface Collection {
   rules: Record<string, any>;
   articles: Article[];
 }
+
 
 export const newsApi = {
   getArticles: async (params?: {
@@ -75,28 +77,29 @@ export const newsApi = {
   },
 
   getKeywordStats: async (limit = 50) => {
-    const response = await api.get<KeywordStats[]>('/api/keywords/stats', {
-      params: { limit },
-    });
+    const response = await api.get<KeywordStat[]>('/api/keywords/stats', { params: { limit } });
     return response.data;
   },
-
+  
   getKeywordNetwork: async (limit = 30) => {
-    const response = await api.get<NetworkData>('/api/keywords/network', {
-      params: { limit },
-    });
+    const response = await api.get<NetworkData>('/api/keywords/network', { params: { limit } });
     return response.data;
   },
 
+  // --- [추가] 카테고리 통계 API 호출 함수 ---
+  getCategoryStats: async () => {
+    const response = await api.get<CategoryStat[]>('/api/categories/stats');
+    return response.data;
+  },
+
+  // --- [복원] 원래 코드에 있던 모든 기능 ---
   getFavorites: async () => {
     const response = await api.get<Article[]>('/api/favorites');
     return response.data;
   },
 
   addFavorite: async (articleId: number) => {
-    const response = await api.post('/api/favorites/add', {
-      article_id: articleId,
-    });
+    const response = await api.post('/api/favorites/add', { article_id: articleId });
     return response.data;
   },
 
@@ -110,51 +113,12 @@ export const newsApi = {
     return response.data;
   },
 
-  // Enhanced news collection
-  collectNews: async (days: number = 30, maxPages: number = 5) => {
-    const response = await api.post('/api/collect-news', {
-      days,
-      max_pages: maxPages,
-    });
+  collectNewsNow: async () => {
+    // 뉴스 수집은 오래 걸릴 수 있으므로 타임아웃을 넉넉하게 3분으로 설정
+    const response = await api.post('/api/collect-news-now', null, { timeout: 180000 });
     return response.data;
   },
-
-  // Immediate news collection with full response and error handling
-  collectNewsNow: async (maxFeeds?: number) => {
-    try {
-      const params = maxFeeds ? { max_feeds: maxFeeds } : {};
-      console.log('📡 API call: /api/collect-news-now with params:', params);
-      
-      const response = await api.post('/api/collect-news-now', null, { 
-        params,
-        timeout: 60000 // 60 second timeout for collection
-      });
-      
-      console.log('📡 API response:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('API Error in collectNewsNow:', error);
-      
-      if (error.response) {
-        // Server responded with error status
-        const errorData = error.response.data;
-        throw new Error(`Server Error (${error.response.status}): ${errorData.detail || errorData.message || 'Unknown error'}`);
-      } else if (error.request) {
-        // Network error
-        throw new Error('Network Error: Unable to reach the server. Please check your connection.');
-      } else {
-        // Other errors
-        throw new Error(`Request Error: ${error.message}`);
-      }
-    }
-  },
-
-  // Get collection status
-  getCollectionStatus: async () => {
-    const response = await api.get('/api/collection-status');
-    return response.data;
-  },
-
+  
   getCollections: async () => {
     const response = await api.get<Collection[]>('/api/collections');
     return response.data;
@@ -164,15 +128,6 @@ export const newsApi = {
     const response = await api.post('/api/collections', { name, rules });
     return response.data;
   },
-
-  extractKeywords: async (articleId: number) => {
-    const response = await api.post(`/api/extract-keywords/${articleId}`);
-    return response.data;
-  },
-
-  translateArticle: async (articleId: number) => {
-    const response = await api.post(`/api/translate/${articleId}`);
-    return response.data;
-  },
-
 };
+
+
