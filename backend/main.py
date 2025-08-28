@@ -56,9 +56,13 @@ ENABLE_CORS = os.getenv("ENABLE_CORS", "true").lower() == "true"
 
 # CORS configuration
 if ENABLE_CORS:
+    origins = [
+    "http://localhost:5173",  # 로컬 개발 환경
+    "https://enginews.netlify.app/",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -851,4 +855,5 @@ async def translate_article(article_id: int):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
