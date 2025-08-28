@@ -2,7 +2,7 @@ services:
   - type: web
     name: streamlit-04
     env: python
-    runtime: python-3.11
+    runtime: python
     buildCommand: |
       # Backend dependencies
       cd backend
@@ -31,4 +31,5 @@ services:
 databases:
   - name: news-postgres
     databaseName: newsdb
+
     user: newsuser
