@@ -9,21 +9,18 @@ services:
       cd backend
       pip install --upgrade pip setuptools wheel
       pip install -r requirements.txt
-      
+
       # Frontend build
       cd ../frontend/news-app
       npm install --legacy-peer-deps
       npm run build
-      
     startCommand: |
       cd backend
       gunicorn wsgi:application --bind 0.0.0.0:$PORT --worker-class uvicorn.workers.UvicornWorker
-    
     disks:
       - name: data
         mountPath: /var/data
         sizeGB: 1
-        
     envVars:
       - key: DB_TYPE
         value: sqlite
