@@ -17,19 +17,17 @@ services:
     startCommand: |
       cd backend
       gunicorn wsgi:application --bind 0.0.0.0:$PORT --worker-class uvicorn.workers.UvicornWorker
-    disks:
-      - name: data
-        mountPath: /var/data
-        sizeGB: 1
+   
     envVars:
       - key: DB_TYPE
         value: sqlite
       - key: SQLITE_PATH
-        value: /var/data/news.db
+        value: /tmp/news.db
       - key: PYTHON_VERSION
         value: "3.11.0"
       - key: OPENAI_API_KEY
         sync: false
+
 
 
 
