@@ -14,7 +14,7 @@ import {
 } from '@mui/icons-material';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 import { newsApi } from './api/newsApi';
 import type { Article, KeywordStat, CategoryStat, NetworkData, Stats, Collection } from './api/newsApi';
@@ -30,6 +30,7 @@ function TabPanel(props: any) {
   return <div role="tabpanel" hidden={value !== index} {...other}>{value === index && <Box sx={{ p: 3 }}>{children}</Box>}</div>;
 }
 
+// [추가] 카테고리 통계 차트 컴포넌트
 function CategoryChart({ data }: { data: CategoryStat[] }) {
     return (
         <ResponsiveContainer width="100%" height={400}>
@@ -48,8 +49,8 @@ function CategoryChart({ data }: { data: CategoryStat[] }) {
 function ArticleCard({ article, onToggleFavorite, onExtractKeywords, onTranslate }: {
   article: Article;
   onToggleFavorite: (id: number) => void;
-  onExtractKeywords: (id: number) => void; // 기능 복원
-  onTranslate: (id: number) => void; // 기능 복원
+  onExtractKeywords: (id: number) => void;
+  onTranslate: (id: number) => void;
 }) {
   const readingTime = calculateReadingTime(article.summary || '');
   return (
@@ -66,6 +67,7 @@ function ArticleCard({ article, onToggleFavorite, onExtractKeywords, onTranslate
               <Chip icon={<ArticleIcon fontSize="small" />} label={article.source} variant="outlined" size="small" color="primary" />
               <Chip icon={<AccessTime fontSize="small" />} label={new Date(article.published).toLocaleDateString('ko-KR')} variant="outlined" size="small" />
               <Chip icon={<Visibility fontSize="small" />} label={formatReadingTime(readingTime)} variant="outlined" size="small" color="secondary" />
+              {/* [추가] 카테고리 정보 표시 */}
               {article.main_category && article.main_category !== '기타' && (
                 <Chip icon={<CategoryIcon />} label={`${article.main_category} > ${article.sub_category}`} size="small" color="success" variant="outlined" />
               )}
@@ -88,7 +90,6 @@ function ArticleCard({ article, onToggleFavorite, onExtractKeywords, onTranslate
                   {article.is_favorite ? <Favorite /> : <FavoriteBorder />}
                 </IconButton>
               </Tooltip>
-              {/* [복원] 키워드 추출 및 번역 버튼 */}
               <Tooltip title="키워드 재추출"><IconButton onClick={() => onExtractKeywords(article.id)} size="small"><TrendingUp fontSize="small" /></IconButton></Tooltip>
               <Tooltip title="번역 (준비중)"><IconButton onClick={() => onTranslate(article.id)} size="small" disabled><TranslateIcon fontSize="small" /></IconButton></Tooltip>
             </Stack>
@@ -112,10 +113,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
 
+  // [복원] 원래의 필터 상태 객체 구조
   const [filters, setFilters] = useState({
     searchTerm: '',
     selectedSource: 'all',
-    selectedCategory: 'all',
+    selectedCategory: 'all', // [추가] 카테고리 필터 상태
     favoritesOnly: false,
     dateFrom: (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; })(),
     dateTo: new Date().toISOString().split('T')[0],
@@ -155,7 +157,7 @@ export default function App() {
     let tempArticles = articles
       .filter(a => filters.favoritesOnly ? a.is_favorite : true)
       .filter(a => filters.selectedSource === 'all' ? true : a.source === filters.selectedSource)
-      .filter(a => filters.selectedCategory === 'all' ? true : a.main_category === filters.selectedCategory)
+      .filter(a => filters.selectedCategory === 'all' ? true : a.main_category === filters.selectedCategory) // [추가] 카테고리 필터링
       .filter(a => filters.dateFrom ? new Date(a.published) >= new Date(filters.dateFrom) : true)
       .filter(a => filters.dateTo ? new Date(a.published) <= new Date(filters.dateTo) : true)
       .filter(a => {
@@ -187,8 +189,7 @@ export default function App() {
     } catch (error) { console.error("즐겨찾기 변경 실패:", error); }
   };
 
-  // [복원] 핸들러 함수들
-  const handleExtractKeywords = (id: number) => alert(`ID ${id} 키워드 추출 기능은 백엔드 자동화로 대체되었습니다.`);
+  const handleExtractKeywords = (id: number) => alert(`ID ${id} 키워드 추출 기능은 백엔드에서 자동으로 처리됩니다.`);
   const onTranslate = (id: number) => alert(`ID ${id} 번역 기능은 준비 중입니다.`);
   const handleCreateCollection = async () => {
     const name = prompt('새 컬렉션 이름을 입력하세요:');
@@ -216,12 +217,14 @@ export default function App() {
       </AppBar>
       
       <Box sx={{ display: 'flex', pt: '64px' }}>
+        {/* [복원] 원래의 사이드바 레이아웃 및 모든 필터 */}
         <Drawer variant="persistent" open={drawerOpen} sx={{ width: 300, flexShrink: 0, '& .MuiDrawer-paper': { width: 300, boxSizing: 'border-box', top: '64px', height: 'calc(100% - 64px)' }}}>
           <Box sx={{ p: 2, overflowY: 'auto', display: 'flex', flexDirection: 'column', height: '100%' }}>
             <Box flexGrow={1}>
               <Typography variant="h6" gutterBottom>🔧 필터링</Typography>
               <Stack spacing={2}>
                 <FormControl fullWidth size="small"><InputLabel>뉴스 출처</InputLabel><Select value={filters.selectedSource} label="뉴스 출처" onChange={e => setFilters(f => ({...f, selectedSource: e.target.value}))}><MenuItem value="all">전체</MenuItem>{sources.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}</Select></FormControl>
+                {/* [추가] 카테고리 필터 */}
                 <FormControl fullWidth size="small"><InputLabel>대분류</InputLabel><Select value={filters.selectedCategory} label="대분류" onChange={e => setFilters(f => ({...f, selectedCategory: e.target.value}))}><MenuItem value="all">전체</MenuItem>{categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}</Select></FormControl>
                 <TextField fullWidth label="키워드 검색" size="small" value={filters.searchTerm} onChange={e => setFilters(f => ({...f, searchTerm: e.target.value}))} />
                 <TextField fullWidth type="date" label="시작일" size="small" value={filters.dateFrom} onChange={e => setFilters(f => ({...f, dateFrom: e.target.value}))} InputLabelProps={{ shrink: true }}/>
@@ -229,6 +232,7 @@ export default function App() {
                 <FormControlLabel control={<Switch checked={filters.favoritesOnly} onChange={e => setFilters(f => ({...f, favoritesOnly: e.target.checked}))}/>} label="즐겨찾기만 보기"/>
               </Stack>
             </Box>
+            {/* [복원] 데이터 관리 및 통계 섹션 */}
             <Box>
               <Divider sx={{ my: 2 }} />
               <Typography variant="h6" gutterBottom>📊 데이터 관리</Typography>
@@ -243,6 +247,7 @@ export default function App() {
         </Drawer>
 
         <Box component="main" sx={{ flexGrow: 1, p: 3, ml: drawerOpen ? '300px' : 0, transition: 'margin-left 0.3s' }}>
+          {/* [복원] 모든 탭과 아이콘 */}
           <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
             <Tab icon={<ArticleIcon />} label="뉴스 목록" />
             <Tab icon={<Analytics />} label="분석" />
@@ -261,6 +266,7 @@ export default function App() {
               <TabPanel value={tabValue} index={1}>
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={6}><Paper sx={{ p: 2 }}><Typography variant="h6">🔥 인기 키워드</Typography><List dense>{keywordStats.slice(0, 15).map(s => <ListItem key={s.keyword}><ListItemText primary={s.keyword} secondary={`${s.count}회`} /></ListItem>)}</List></Paper></Grid>
+                  {/* [추가] 카테고리 통계 차트 */}
                   <Grid item xs={12} md={6}><Paper sx={{ p: 2 }}><Typography variant="h6">📊 카테고리별 기사 수</Typography>{categoryStats.length > 0 ? <CategoryChart data={categoryStats} /> : <Alert severity="info">데이터 없음</Alert>}</Paper></Grid>
                   <Grid item xs={12}><KeywordNetwork data={networkData} /></Grid>
                 </Grid>
@@ -277,6 +283,4 @@ export default function App() {
     </ThemeProvider>
   );
 }
-
-
 
