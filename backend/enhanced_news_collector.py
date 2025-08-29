@@ -1,4 +1,4 @@
-# backend/enhanced_news_collector.py (카테고리 분류 기능이 추가된 최종 버전)
+# backend/enhanced_news_collector.py (정교한 키워드 사전이 반영된 최종 버전)
 
 import logging
 import time
@@ -17,7 +17,7 @@ from database import db
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 1. 레퍼런스 코드를 참고한 카테고리 사전 정의 ---
+# --- 1. 사용자 제공 카테고리 및 키워드 사전 ---
 CATEGORIES = {
     "첨단 제조·기술 산업": {
         "반도체": ["반도체", "메모리", "dram", "nand", "hbm", "파운드리", "foundry", "euv"],
@@ -33,14 +33,63 @@ CATEGORIES = {
     },
 }
 
+# --- 2. [추가] 사용자 제공 기술 키워드 및 불용어 사전 ---
+STOP_WORDS = {
+    "기자", "뉴스", "특파원", "오늘", "매우", "기사", "사진", "영상", "제공", "입력",
+    "것", "수", "등", "및", "그리고", "그러나", "하지만", "지난", "이번", "관련", "대한", "통해", "대해", "위해",
+    "입니다", "한다", "했다", "하였다", "에서는", "에서", "대한", "이날", "라며", "다고", "였다", "했다가", "하며",
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was", "one", "our"
+}
+
+TECH_KEYWORDS = {
+    "ai", "인공지능", "machine learning", "머신러닝", "deep learning", "딥러닝",
+    "chatgpt", "gpt", "llm", "생성형ai", "generative ai", "신경망", "neural network",
+    "반도체", "semiconductor", "메모리", "memory", "dram", "nand", "hbm",
+    "gpu", "cpu", "npu", "tpu", "fpga", "asic", "칩셋", "chipset",
+    "삼성전자", "samsung", "sk하이닉스", "tsmc", "엔비디아", "nvidia",
+    "5g", "6g", "lte", "와이파이", "wifi", "블루투스", "bluetooth",
+    "클라우드", "cloud", "데이터센터", "data center", "서버", "server",
+    "네트워크", "network", "cdn", "api", "sdk",
+    "블록체인", "blockchain", "암호화폐", "cryptocurrency", "bitcoin", "비트코인",
+    "ethereum", "이더리움", "nft", "defi", "메타버스", "metaverse",
+    "자율주행", "autonomous", "전기차", "electric vehicle", "ev", "tesla", "테슬라",
+    "배터리", "battery", "리튬", "lithium", "수소", "hydrogen",
+    "보안", "security", "해킹", "hacking", "사이버", "cyber", "랜섬웨어", "ransomware",
+    "개인정보", "privacy", "데이터보호", "gdpr", "제로트러스트", "zero trust",
+    "오픈소스", "open source", "개발자", "developer", "프로그래밍", "programming",
+    "python", "javascript", "react", "node.js", "docker", "kubernetes",
+}
+
+# Comprehensive RSS feeds (Korean + Global)
 FEEDS = [
-    {"feed_url": "https://it.donga.com/feeds/rss/", "source": "IT동아"},
-    {"feed_url": "https://rss.etnews.com/Section902.xml", "source": "전자신문_속보"},
-    {"feed_url": "https://www.bloter.net/feed", "source": "Bloter"},
-    {"feed_url": "https://byline.network/feed/", "source": "Byline Network"},
-    {"feed_url": "https://platum.kr/feed", "source": "Platum"},
-    {"feed_url": "https://techcrunch.com/feed/", "source": "TechCrunch"},
-    {"feed_url": "https://www.theverge.com/rss/index.xml", "source": "The Verge"},
+    # Korean Tech News
+    {"feed_url": "https://it.donga.com/feeds/rss/", "source": "IT동아", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://rss.etnews.com/Section902.xml", "source": "전자신문_속보", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://rss.etnews.com/Section901.xml", "source": "전자신문_오늘의뉴스", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://zdnet.co.kr/news/news_xml.asp", "source": "ZDNet Korea", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.itworld.co.kr/rss/all.xml", "source": "ITWorld Korea", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.ciokorea.com/rss/all.xml", "source": "CIO Korea", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.bloter.net/feed", "source": "Bloter", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://byline.network/feed/", "source": "Byline Network", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://platum.kr/feed", "source": "Platum", "category": "Startup", "lang": "ko"},
+    {"feed_url": "https://www.boannews.com/media/news_rss.xml", "source": "보안뉴스", "category": "Security", "lang": "ko"},
+    {"feed_url": "https://it.chosun.com/rss.xml", "source": "IT조선", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.ddaily.co.kr/news_rss.php", "source": "디지털데일리", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.kbench.com/rss.xml", "source": "KBench", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.sedaily.com/rss/IT.xml", "source": "서울경제 IT", "category": "IT", "lang": "ko"},
+    {"feed_url": "https://www.hankyung.com/feed/it", "source": "한국경제 IT", "category": "IT", "lang": "ko"},
+    
+    # Global Tech News
+    {"feed_url": "https://techcrunch.com/feed/", "source": "TechCrunch", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://www.eetimes.com/feed/", "source": "EE Times", "category": "Electronics", "lang": "en"},
+    {"feed_url": "https://spectrum.ieee.org/rss/fulltext", "source": "IEEE Spectrum", "category": "Engineering", "lang": "en"},
+    {"feed_url": "https://www.technologyreview.com/feed/", "source": "MIT Tech Review", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://www.theverge.com/rss/index.xml", "source": "The Verge", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://www.wired.com/feed/rss", "source": "WIRED", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://www.engadget.com/rss.xml", "source": "Engadget", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://venturebeat.com/category/ai/feed/", "source": "VentureBeat AI", "category": "AI", "lang": "en"},
+    {"feed_url": "https://arstechnica.com/feed/", "source": "Ars Technica", "category": "Tech", "lang": "en"},
+    {"feed_url": "https://feeds.feedburner.com/oreilly/radar", "source": "O'Reilly Radar", "category": "Tech", "lang": "en"},
 ]
 
 class EnhancedNewsCollector:
@@ -48,27 +97,29 @@ class EnhancedNewsCollector:
         self.session = requests.Session()
         self.stats = {}
 
-    def _classify_article(self, title: str, content: str) -> Dict:
-        """[추가된 기능] 기사 제목/본문으로 카테고리를 자동 분류합니다."""
+    def _analyze_article(self, title: str, content: str) -> Dict:
+        """[개선된 기능] 기사를 분류하고, 사전에 정의된 기술 키워드만 추출합니다."""
         text = f"{title} {content}".lower()
+        
+        # 1. 카테고리 분류
         best_match = {'score': 0, 'main': '기타', 'sub': '기타'}
-
         for main_cat, subcats in CATEGORIES.items():
             for sub_cat, keywords in subcats.items():
                 score = sum(1 for kw in keywords if kw in text)
                 if score > best_match['score']:
                     best_match = {'score': score, 'main': main_cat, 'sub': sub_cat}
         
-        return {'main_category': best_match['main'], 'sub_category': best_match['sub']}
-
-    def _extract_keywords_simple(self, text: str, top_n: int = 10) -> List[str]:
-        if not text: return []
-        text = re.sub(r'[^\w\s]', '', text)
-        words = text.split()
-        candidates = [word for word in words if len(word) > 1 and not word.isnumeric()]
-        stop_words = {"기자", "뉴스", "사진", "제공", "이번", "지난"}
-        keywords = [word for word in candidates if word not in stop_words]
-        return list(dict.fromkeys(keywords))[:top_n]
+        # 2. 기술 키워드 추출
+        extracted_keywords = {kw for kw in TECH_KEYWORDS if kw in text}
+        
+        # 3. 불용어 처리
+        final_keywords = {kw for kw in extracted_keywords if kw.lower() not in STOP_WORDS}
+        
+        return {
+            'main_category': best_match['main'],
+            'sub_category': best_match['sub'],
+            'keywords': sorted(list(final_keywords))
+        }
 
     def _process_entry(self, entry: Dict, source: str) -> Optional[Dict]:
         title = entry.get("title", "No Title").strip()
@@ -79,16 +130,15 @@ class EnhancedNewsCollector:
         except: published = datetime.now().isoformat()
 
         summary = BeautifulSoup(entry.get("summary", ""), "html.parser").get_text(separator=' ', strip=True)
-        keywords = self._extract_keywords_simple(f"{title} {summary}")
         
-        # [추가] 카테고리 분류 실행
-        classification = self._classify_article(title, summary)
+        analysis_result = self._analyze_article(title, summary)
 
         article_data = {
             'title': title, 'link': link, 'published': published,
-            'source': source, 'summary': summary, 'keywords': keywords,
-            'main_category': classification['main_category'],
-            'sub_category': classification['sub_category'],
+            'source': source, 'summary': summary,
+            'keywords': analysis_result['keywords'],
+            'main_category': analysis_result['main_category'],
+            'sub_category': analysis_result['sub_category'],
         }
         return article_data
 
@@ -139,4 +189,3 @@ class EnhancedNewsCollector:
         return {'status': 'success', 'duration': duration, 'stats': save_stats}
 
 collector = EnhancedNewsCollector()
-
