@@ -197,19 +197,28 @@ class EnhancedNewsCollector:
         feeds_to_process = FEEDS[:max_feeds] if max_feeds else FEEDS
         
         all_articles = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_feed = {executor.submit(self.collect_from_feed, feed): feed for feed in feeds_to_process}
-            for future in as_completed(future_to_feed):
-                feed_config = future_to_feed[future]
-                try:
-                    # [수정] 각 피드별 작업에 60초의 타임아웃을 설정
-                    articles_from_feed = future.result(timeout=60)
-                    all_articles.extend(articles_from_feed)
-                except TimeoutError:
-                    logger.error(f"❌ {feed_config['source']} 수집 시간 초과 (60초).")
-                except Exception as e:
-                    logger.error(f"❌ {feed_config['source']} 처리 중 오류 발생: {e}")
         
+        # Process feeds in parallel
+        if PARALLEL_MAX_WORKERS > 1:
+            with ThreadPoolExecutor(max_workers=min(PARALLEL_MAX_WORKERS, len(feeds_to_process))) as executor:
+                future_to_feed = {
+                    executor.submit(self.collect_from_feed, feed): feed 
+                    for feed in feeds_to_process
+                }
+                
+                for future in as_completed(future_to_feed):
+                    try:
+                        articles = future.result(timeout=60)  # 60 second timeout per feed
+                        all_articles.extend(articles)
+                    except Exception as e:
+                        feed = future_to_feed[future]
+                        logger.error(f"Feed collection failed: {feed.get('source', 'Unknown')}: {e}")
+        else:
+            # Sequential processing
+            for feed in feeds_to_process:
+                articles = self.collect_from_feed(feed)
+                all_articles.extend(articles)
+                
         unique_articles = list({article['link']: article for article in all_articles}.values())
         if unique_articles:
             save_stats = self.save_articles(unique_articles)
