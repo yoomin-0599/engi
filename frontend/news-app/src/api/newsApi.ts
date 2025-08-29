@@ -67,7 +67,7 @@ export const newsApi = {
     return response.data;
   },
   collectNewsNow: async () => {
-    const response = await api.post('/api/collect-news-now', null, { timeout: 180000 });
+    const response = await api.post('/api/collect-news-now', null, { timeout: 300000 });
     return response.data;
   },
   createCollection: async (name: string, rules: object = {}) => {
@@ -79,6 +79,7 @@ export const newsApi = {
       return response.data;
   },
 };
+
 
 
 
