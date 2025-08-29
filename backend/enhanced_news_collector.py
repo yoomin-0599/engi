@@ -97,31 +97,52 @@ class EnhancedNewsCollector:
         self.session = requests.Session()
         self.stats = {}
 
-    def _analyze_article(self, title: str, content: str) -> Dict:
-        """[개선된 기능] 기사를 분류하고, 사전에 정의된 기술 키워드만 추출합니다."""
-        text = f"{title} {content}".lower()
-        
-        # 1. 카테고리 분류
+    def _classify_article(self, text: str) -> Dict:
+        """기사 텍스트를 기반으로 카테고리를 분류합니다."""
         best_match = {'score': 0, 'main': '기타', 'sub': '기타'}
         for main_cat, subcats in CATEGORIES.items():
             for sub_cat, keywords in subcats.items():
                 score = sum(1 for kw in keywords if kw in text)
                 if score > best_match['score']:
                     best_match = {'score': score, 'main': main_cat, 'sub': sub_cat}
-        
-        # 2. 기술 키워드 추출
-        extracted_keywords = {kw for kw in TECH_KEYWORDS if kw in text}
-        
-        # 3. 불용어 처리
-        final_keywords = {kw for kw in extracted_keywords if kw.lower() not in STOP_WORDS}
-        
-        return {
-            'main_category': best_match['main'],
-            'sub_category': best_match['sub'],
-            'keywords': sorted(list(final_keywords))
-        }
+        return {'main_category': best_match['main'], 'sub_category': best_match['sub']}
 
-    def _process_entry(self, entry: Dict, source: str) -> Optional[Dict]:
+    def extract_main_text(self, url: str) -> str:
+        """기사 URL에 직접 접속하여 본문 텍스트를 추출합니다."""
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            response = self.session.get(url, timeout=20, headers=headers, allow_redirects=True)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            for element in soup(["script", "style", "nav", "footer", "aside", "header"]): element.decompose()
+            
+            content_selectors = ["article", "[class*='article']", "[id*='content']", "main", "[class*='post-content']"]
+            for selector in content_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    main_content = element.get_text(separator="\n", strip=True)
+                    if len(main_content) > 200: return main_content
+            return ""
+        except Exception as e:
+            logger.warning(f"본문 추출 실패: {url} - {e}")
+            return ""
+    
+    def extract_keywords(self, text: str, title: str, top_k: int = 15) -> List[str]:
+        """정교한 방식으로 키워드를 추출합니다."""
+        if not text and not title: return []
+        combined_text = f"{title} {text}".lower()
+        keywords = {kw for kw in TECH_KEYWORDS if kw in combined_text}
+        
+        patterns = [r'\b[A-Z]{3,}\b', r'[가-힣]{2,8}(?:기술|시스템|플랫폼)']
+        for pattern in patterns:
+            matches = re.findall(pattern, f"{title} {text}")
+            keywords.update(matches)
+        
+        unique_keywords = [kw for kw in list(keywords) if kw.lower() not in STOP_WORDS and len(kw) > 1]
+        return unique_keywords[:top_k]
+
+    def process_entry(self, entry: Dict, source: str, language: str) -> Optional[Dict]:
+        """개별 뉴스 항목을 처리하고, 분류 및 키워드 추출을 수행합니다."""
         title = entry.get("title", "No Title").strip()
         link = entry.get("link", "").strip()
         if not title or not link: return None
@@ -130,20 +151,22 @@ class EnhancedNewsCollector:
         except: published = datetime.now().isoformat()
 
         summary = BeautifulSoup(entry.get("summary", ""), "html.parser").get_text(separator=' ', strip=True)
+        raw_text = self.extract_main_text(link)
         
-        analysis_result = self._analyze_article(title, summary)
+        full_text = f"{title} {summary} {raw_text}"
+        classification = self._classify_article(full_text)
+        keywords = self.extract_keywords(raw_text or summary, title)
 
-        article_data = {
-            'title': title, 'link': link, 'published': published,
-            'source': source, 'summary': summary,
-            'keywords': analysis_result['keywords'],
-            'main_category': analysis_result['main_category'],
-            'sub_category': analysis_result['sub_category'],
+        return {
+            'title': title, 'link': link, 'published': published, 'source': source,
+            'summary': summary, 'keywords': keywords, 'raw_text': raw_text,
+            'main_category': classification['main_category'],
+            'sub_category': classification['sub_category'],
+            'language': language
         }
-        return article_data
 
     def collect_from_feed(self, feed_config: Dict) -> List[Dict]:
-        feed_url, source = feed_config.get("feed_url"), feed_config.get("source", "Unknown")
+        feed_url, source, lang = feed_config.get("feed_url"), feed_config.get("source"), feed_config.get("lang")
         logger.info(f"📡 {source}에서 뉴스 수집 시작...")
         try:
             response = self.session.get(feed_url, timeout=20)
@@ -152,7 +175,7 @@ class EnhancedNewsCollector:
             if not feed or not feed.entries:
                 logger.warning(f"❌ {source}에서 기사를 찾을 수 없습니다."); return []
             
-            articles = [self._process_entry(entry, source) for entry in feed.entries[:20]]
+            articles = [self.process_entry(entry, source, lang) for entry in feed.entries[:20]]
             valid_articles = [article for article in articles if article]
             logger.info(f"✅ {source}: {len(valid_articles)}개 기사 처리 완료.")
             return valid_articles
