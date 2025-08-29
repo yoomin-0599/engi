@@ -1,14 +1,14 @@
-# backend/main.py (백그라운드 작업으로 수정, 디버그 엔드포인트 추가)
+# backend/main.py (임포트 오류 수정)
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from typing import List, Dict, Optional
 import logging
-import os # os 모듈 추가
+import os
 
 # --- 1. 프로젝트 모듈 import ---
-from database import db, DB_PATH # DB_PATH 추가
+from database import db # db 객체만 임포트
 from enhanced_news_collector import collector
 
 # --- 2. 로깅 및 FastAPI 앱 설정 ---
@@ -16,9 +16,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="News IT's Issue API (Debug v2.2.3)", # 디버깅을 위해 제목 변경
+    title="News IT's Issue API (v2.2.4)", # 버전 업데이트
     description="Enhanced IT/Tech News Collection and Analysis Platform",
-    version="2.2.3" # 버전 업데이트
+    version="2.2.4"
 )
 
 app.add_middleware(
@@ -48,13 +48,7 @@ class FavoriteRequest(BaseModel):
     article_id: int
 
 # --- 4. 데이터베이스 초기화 ---
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🚀 API Server starting up...")
-    try:
-        db.init_database()
-    except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+# @app.on_event("startup") 에서 db.init_database()가 호출되므로 별도 호출 불필요
 
 # --- 5. API 엔드포인트 ---
 
@@ -139,10 +133,10 @@ async def collect_news_now(background_tasks: BackgroundTasks, max_feeds: Optiona
     background_tasks.add_task(run_news_collection, max_feeds)
     return {"message": "뉴스 수집 작업이 백그라운드에서 시작되었습니다. 완료까지 몇 분 정도 소요될 수 있습니다."}
 
-# --- 7. 디버깅 엔드포인트 추가 ---
+# --- 7. 디버깅 엔드포인트 수정 ---
 @app.get("/api/debug-info")
 async def debug_info():
-    db_path = DB_PATH
+    db_path = db.db_path # db 객체에서 경로를 가져옴
     db_exists = os.path.exists(db_path)
     try:
         article_count = db.execute_query("SELECT COUNT(*) as count FROM articles")[0]['count']
