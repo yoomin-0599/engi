@@ -131,7 +131,8 @@ class EnhancedNewsCollector:
         """기사 URL에 직접 접속하여 본문 텍스트를 추출합니다."""
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            response = self.session.get(url, timeout=20, headers=headers, allow_redirects=True)
+            # [개선] 타임아웃을 25초로 넉넉하게 설정
+            response = self.session.get(url, timeout=25, headers=headers, allow_redirects=True)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
             for element in soup(["script", "style", "nav", "footer", "aside", "header"]): element.decompose()
@@ -141,25 +142,30 @@ class EnhancedNewsCollector:
                 element = soup.select_one(selector)
                 if element:
                     main_content = element.get_text(separator="\n", strip=True)
-                    if len(main_content) > 200: return main_content
+                    # 너무 짧은 내용은 무시
+                    if len(main_content) > 200:
+                        return main_content
             return ""
         except Exception as e:
             logger.warning(f"본문 추출 실패: {url} - {e}")
             return ""
     
-    def extract_keywords(self, text: str, title: str, top_k: int = 15) -> List[str]:
+    def extract_keywords(self, text: str, title: str) -> List[str]:
         """정교한 방식으로 키워드를 추출합니다."""
         if not text and not title: return []
         combined_text = f"{title} {text}".lower()
+        # 1. 기술 키워드 사전에서 먼저 찾기
         keywords = {kw for kw in TECH_KEYWORDS if kw in combined_text}
         
+        # 2. 정규표현식으로 패턴 찾기 (예: 대문자 약어)
         patterns = [r'\b[A-Z]{3,}\b', r'[가-힣]{2,8}(?:기술|시스템|플랫폼)']
         for pattern in patterns:
             matches = re.findall(pattern, f"{title} {text}")
             keywords.update(matches)
         
+        # 3. 불용어 제거 및 최종 정리
         unique_keywords = [kw for kw in list(keywords) if kw.lower() not in STOP_WORDS and len(kw) > 1]
-        return unique_keywords[:top_k]
+        return unique_keywords[:15] # 최대 15개
 
     def process_entry(self, entry: Dict, source: str, language: str) -> Optional[Dict]:
         """개별 뉴스 항목을 처리하고, 분류 및 키워드 추출을 수행합니다."""
@@ -167,8 +173,10 @@ class EnhancedNewsCollector:
         link = entry.get("link", "").strip()
         if not title or not link: return None
 
-        try: published = dateutil.parser.parse(entry.get("published", "")).isoformat()
-        except: published = datetime.now().isoformat()
+        try:
+            published = dateutil.parser.parse(entry.get("published", "")).isoformat()
+        except:
+            published = datetime.now().isoformat()
 
         summary = BeautifulSoup(entry.get("summary", ""), "html.parser").get_text(separator=' ', strip=True)
         raw_text = self.extract_main_text(link)
@@ -189,7 +197,7 @@ class EnhancedNewsCollector:
         feed_url, source, lang = feed_config.get("feed_url"), feed_config.get("source"), feed_config.get("lang")
         logger.info(f"📡 {source}에서 뉴스 수집 시작...")
         try:
-            response = self.session.get(feed_url, timeout=20)
+            response = self.session.get(feed_url, timeout=20) # 피드 자체 타임아웃
             response.raise_for_status()
             feed = feedparser.parse(response.content)
             if not feed or not feed.entries:
@@ -203,42 +211,38 @@ class EnhancedNewsCollector:
             logger.error(f"❌ {source} 수집 실패: {e}"); return []
 
     def save_articles(self, articles: List[Dict]) -> Dict:
+        """기사를 데이터베이스에 저장합니다."""
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
         for article in articles:
             try:
-                result = db.insert_or_update_article(article); stats[result] += 1
+                result = db.insert_or_update_article(article)
+                stats[result] += 1
             except Exception as e:
-                logger.error(f"DB 저장 오류 ({article.get('link')}): {e}"); stats['skipped'] += 1
+                logger.error(f"DB 저장 오류 ({article.get('link')}): {e}")
+                stats['skipped'] += 1
         return stats
 
     def collect_all_news(self, max_feeds: Optional[int] = None) -> Dict:
+        """모든 뉴스 소스에서 데이터를 수집하고 저장합니다."""
         logger.info("🚀 전체 뉴스 수집 작업을 시작합니다.")
         start_time = time.time()
         feeds_to_process = FEEDS[:max_feeds] if max_feeds else FEEDS
         
         all_articles = []
-        
-        # Process feeds in parallel
-        if PARALLEL_MAX_WORKERS > 1:
-            with ThreadPoolExecutor(max_workers=min(PARALLEL_MAX_WORKERS, len(feeds_to_process))) as executor:
-                future_to_feed = {
-                    executor.submit(self.collect_from_feed, feed): feed 
-                    for feed in feeds_to_process
-                }
-                
-                for future in as_completed(future_to_feed):
-                    try:
-                        articles = future.result(timeout=60)  # 60 second timeout per feed
-                        all_articles.extend(articles)
-                    except Exception as e:
-                        feed = future_to_feed[future]
-                        logger.error(f"Feed collection failed: {feed.get('source', 'Unknown')}: {e}")
-        else:
-            # Sequential processing
-            for feed in feeds_to_process:
-                articles = self.collect_from_feed(feed)
-                all_articles.extend(articles)
-                
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_feed = {executor.submit(self.collect_from_feed, feed): feed for feed in feeds_to_process}
+            for future in as_completed(future_to_feed):
+                feed_config = future_to_feed[future]
+                try:
+                    # [개선] 개별 피드 처리 타임아웃 설정
+                    articles_from_feed = future.result(timeout=60)
+                    all_articles.extend(articles_from_feed)
+                except TimeoutError:
+                    logger.error(f"❌ {feed_config['source']} 수집 시간 초과 (60초).")
+                except Exception as e:
+                    logger.error(f"❌ {feed_config['source']} 처리 중 오류 발생: {e}")
+
+        # 링크 기준으로 중복 제거
         unique_articles = list({article['link']: article for article in all_articles}.values())
         if unique_articles:
             save_stats = self.save_articles(unique_articles)
@@ -249,3 +253,4 @@ class EnhancedNewsCollector:
         return {'status': 'success', 'duration': duration, 'stats': save_stats}
 
 collector = EnhancedNewsCollector()
+
