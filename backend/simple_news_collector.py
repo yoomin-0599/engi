@@ -1,15 +1,15 @@
 """
-Simple news collector for testing and development
-Standalone script that can run independently
+Simple news collector for testing and development.
+Standalone script that can run independently.
+Connects to the main database via `database.py`.
 """
 
-import sqlite3
-import requests
 import feedparser
-import json
-import os
 from datetime import datetime
 from typing import List, Dict
+
+# Import the shared database instance
+from database import db
 
 # Simple configuration - expanded feed list
 FEEDS = [
@@ -38,43 +38,10 @@ FEEDS = [
     {"feed_url": "https://www.cnet.com/rss/news/", "source": "CNET News"},
 ]
 
-DB_PATH = "simple_news.db"
-HEADERS = {"User-Agent": "Mozilla/5.0 (NewsAgent/1.0)"}
-
-def init_simple_db():
-    """Initialize simple database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            link TEXT UNIQUE NOT NULL,
-            published TEXT,
-            source TEXT,
-            summary TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS favorites (
-            article_id INTEGER UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
-    print("✅ Simple database initialized")
-
 def collect_from_feed(feed_url: str, source: str, max_items: int = 10) -> List[Dict]:
     """Collect news from a single RSS feed"""
     try:
         print(f"📡 Collecting from {source}...")
-        
-        # Parse RSS feed
         feed = feedparser.parse(feed_url)
         if not hasattr(feed, 'entries') or not feed.entries:
             print(f"❌ No entries found for {source}")
@@ -88,12 +55,15 @@ def collect_from_feed(feed_url: str, source: str, max_items: int = 10) -> List[D
                     'link': getattr(entry, 'link', '').strip(),
                     'published': getattr(entry, 'published', datetime.now().strftime('%Y-%m-%d')),
                     'source': source,
-                    'summary': getattr(entry, 'summary', '')[:500] if hasattr(entry, 'summary') else ''
+                    'summary': getattr(entry, 'summary', '')[:500] if hasattr(entry, 'summary') else '',
+                    'keywords': [],  # Add empty keywords for compatibility
+                    'raw_text': '',
+                    'main_category': '기타',
+                    'sub_category': '기타',
+                    'language': 'ko' if '.co.kr' in feed_url or '.kr' in feed_url else 'en'
                 }
-                
                 if article['title'] and article['link']:
                     articles.append(article)
-                    
             except Exception as e:
                 print(f"⚠️ Error processing entry from {source}: {e}")
                 continue
@@ -105,58 +75,27 @@ def collect_from_feed(feed_url: str, source: str, max_items: int = 10) -> List[D
         print(f"❌ Error collecting from {source}: {e}")
         return []
 
-def save_articles(articles: List[Dict]) -> Dict[str, int]:
-    """Save articles to database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    stats = {'inserted': 0, 'skipped': 0}
-    
+def save_articles_to_db(articles: List[Dict]) -> Dict[str, int]:
+    """Save articles to the main database using the shared db instance."""
+    stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
     for article in articles:
         try:
-            cursor.execute("""
-                INSERT OR IGNORE INTO articles (title, link, published, source, summary)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                article['title'],
-                article['link'], 
-                article['published'],
-                article['source'],
-                article['summary']
-            ))
-            
-            if cursor.rowcount > 0:
+            result = db.insert_or_update_article(article)
+            if result == "inserted":
                 stats['inserted'] += 1
-            else:
-                stats['skipped'] += 1
-                
+            elif result == "updated":
+                stats['updated'] += 1
         except Exception as e:
-            print(f"⚠️ Error saving article: {e}")
+            print(f"⚠️ Error saving article '{article.get('title', '')}': {e}")
             stats['skipped'] += 1
-    
-    conn.commit()
-    conn.close()
-    
     return stats
 
-def collect_all_feeds():
-    """Collect news from all feeds and save to DB"""
-    all_articles = []
-    for feed in FEEDS:
-        articles = collect_from_feed(feed['feed_url'], feed['source'])
-        all_articles.extend(articles)
-    
-    if all_articles:
-        stats = save_articles(all_articles)
-        return len(all_articles), stats
-    return 0, {'inserted': 0, 'skipped': 0}
-
 def run_simple_collection():
-    """Run simple news collection"""
+    """Run simple news collection and save to the main database."""
     print("🚀 Starting simple news collection...")
     
-    # Initialize database
-    init_simple_db()
+    # Initialize the main database (ensures tables exist)
+    db.init_database()
     
     # Collect from all feeds
     all_articles = []
@@ -168,59 +107,44 @@ def run_simple_collection():
         print("❌ No articles collected")
         return
     
-    # Save articles
-    stats = save_articles(all_articles)
+    # Save articles to the database
+    stats = save_articles_to_db(all_articles)
     
     print(f"📊 Collection complete:")
     print(f"   - Total collected: {len(all_articles)}")
     print(f"   - Newly inserted: {stats['inserted']}")
-    print(f"   - Skipped (duplicates): {stats['skipped']}")
+    print(f"   - Updated: {stats['updated']}")
+    print(f"   - Skipped (errors): {stats['skipped']}")
     
-    # Show database stats
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM articles")
-    total = cursor.fetchone()[0]
-    cursor.execute("SELECT source, COUNT(*) FROM articles GROUP BY source ORDER BY COUNT(*) DESC")
-    by_source = cursor.fetchall()
-    conn.close()
-    
-    print(f"📈 Database stats:")
-    print(f"   - Total articles: {total}")
-    for source, count in by_source:
-        print(f"   - {source}: {count}")
+    # Show database stats from the main DB
+    try:
+        total_query = "SELECT COUNT(*) as count FROM articles"
+        source_query = "SELECT source, COUNT(*) as count FROM articles GROUP BY source ORDER BY count DESC"
+        
+        total = db.execute_query(total_query)[0]['count']
+        by_source = db.execute_query(source_query)
+        
+        print(f"📈 Database stats:")
+        print(f"   - Total articles in DB: {total}")
+        for item in by_source:
+            print(f"   - {item['source']}: {item['count']}")
+    except Exception as e:
+        print(f"⚠️ Could not retrieve DB stats: {e}")
 
-def get_recent_articles(limit: int = 10) -> List[Dict]:
-    """Get recent articles from database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT id, title, link, published, source, summary, created_at
-        FROM articles 
-        ORDER BY created_at DESC 
-        LIMIT ?
-    """, (limit,))
-    
-    articles = []
-    for row in cursor.fetchall():
-        articles.append({
-            'id': row[0],
-            'title': row[1],
-            'link': row[2],
-            'published': row[3],
-            'source': row[4],
-            'summary': row[5],
-            'created_at': row[6]
-        })
-    
-    conn.close()
-    return articles
+def get_recent_articles_from_db(limit: int = 10) -> List[Dict]:
+    """Get recent articles from the main database."""
+    print("\n📰 Fetching recent articles from DB...")
+    try:
+        return db.get_articles_with_filters(limit=limit, offset=0)
+    except Exception as e:
+        print(f"⚠️ Could not fetch recent articles: {e}")
+        return []
 
 if __name__ == "__main__":
     run_simple_collection()
     
-    print("\n📰 Recent articles:")
-    recent = get_recent_articles(5)
-    for i, article in enumerate(recent, 1):
-        print(f"{i}. [{article['source']}] {article['title'][:60]}...")
+    recent = get_recent_articles_from_db(5)
+    if recent:
+        print("\n📰 Recent articles in DB:")
+        for i, article in enumerate(recent, 1):
+            print(f"{i}. [{article['source']}] {article['title'][:60]}...")
