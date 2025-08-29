@@ -86,30 +86,24 @@ FEEDS = [
     {"feed_url": "https://it.donga.com/feeds/rss/", "source": "IT동아", "category": "IT", "lang": "ko"},
     {"feed_url": "https://rss.etnews.com/Section902.xml", "source": "전자신문_속보", "category": "IT", "lang": "ko"},
     {"feed_url": "https://rss.etnews.com/Section901.xml", "source": "전자신문_오늘의뉴스", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://zdnet.co.kr/news/news_xml.asp", "source": "ZDNet Korea", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.itworld.co.kr/rss/all.xml", "source": "ITWorld Korea", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.ciokorea.com/rss/all.xml", "source": "CIO Korea", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.bloter.net/feed", "source": "Bloter", "category": "IT", "lang": "ko"},
+   
+  
+   
     {"feed_url": "https://byline.network/feed/", "source": "Byline Network", "category": "IT", "lang": "ko"},
     {"feed_url": "https://platum.kr/feed", "source": "Platum", "category": "Startup", "lang": "ko"},
     {"feed_url": "https://www.boannews.com/media/news_rss.xml", "source": "보안뉴스", "category": "Security", "lang": "ko"},
-    {"feed_url": "https://it.chosun.com/rss.xml", "source": "IT조선", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.ddaily.co.kr/news_rss.php", "source": "디지털데일리", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.kbench.com/rss.xml", "source": "KBench", "category": "IT", "lang": "ko"},
-    {"feed_url": "https://www.sedaily.com/rss/IT.xml", "source": "서울경제 IT", "category": "IT", "lang": "ko"},
+    
+    
     {"feed_url": "https://www.hankyung.com/feed/it", "source": "한국경제 IT", "category": "IT", "lang": "ko"},
     
     # Global Tech News
     {"feed_url": "https://techcrunch.com/feed/", "source": "TechCrunch", "category": "Tech", "lang": "en"},
     {"feed_url": "https://www.eetimes.com/feed/", "source": "EE Times", "category": "Electronics", "lang": "en"},
-    {"feed_url": "https://spectrum.ieee.org/rss/fulltext", "source": "IEEE Spectrum", "category": "Engineering", "lang": "en"},
     {"feed_url": "https://www.technologyreview.com/feed/", "source": "MIT Tech Review", "category": "Tech", "lang": "en"},
-    {"feed_url": "https://www.theverge.com/rss/index.xml", "source": "The Verge", "category": "Tech", "lang": "en"},
     {"feed_url": "https://www.wired.com/feed/rss", "source": "WIRED", "category": "Tech", "lang": "en"},
     {"feed_url": "https://www.engadget.com/rss.xml", "source": "Engadget", "category": "Tech", "lang": "en"},
     {"feed_url": "https://venturebeat.com/category/ai/feed/", "source": "VentureBeat AI", "category": "AI", "lang": "en"},
     {"feed_url": "https://arstechnica.com/feed/", "source": "Ars Technica", "category": "Tech", "lang": "en"},
-    {"feed_url": "https://feeds.feedburner.com/oreilly/radar", "source": "O'Reilly Radar", "category": "Tech", "lang": "en"},
 ]
 
 class EnhancedNewsCollector:
