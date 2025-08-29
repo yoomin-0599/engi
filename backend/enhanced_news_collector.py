@@ -17,6 +17,25 @@ from database import db
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Enhanced configuration
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "15"))
+MAX_TOTAL_PER_SOURCE = int(os.getenv("MAX_TOTAL_PER_SOURCE", "200"))
+RSS_BACKFILL_PAGES = int(os.getenv("RSS_BACKFILL_PAGES", "3"))
+
+CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "10.0"))
+READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "15.0"))
+
+ENABLE_SUMMARY = os.getenv("ENABLE_SUMMARY", "false").lower() == "true"
+ENABLE_HTTP_CACHE = os.getenv("ENABLE_HTTP_CACHE", "true").lower() == "true"
+HTTP_CACHE_EXPIRE = int(os.getenv("HTTP_CACHE_EXPIRE", "3600"))
+PARALLEL_MAX_WORKERS = int(os.getenv("PARALLEL_MAX_WORKERS", "8"))
+SKIP_UPDATE_IF_EXISTS = os.getenv("SKIP_UPDATE_IF_EXISTS", "true").lower() == "true"
+
+STRICT_TECH_KEYWORDS = os.getenv("STRICT_TECH_KEYWORDS", "true").lower() == "true"
+SKIP_NON_TECH = os.getenv("SKIP_NON_TECH", "false").lower() == "true"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
 # --- 1. 사용자 제공 카테고리 및 키워드 사전 ---
 CATEGORIES = {
     "첨단 제조·기술 산업": {
