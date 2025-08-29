@@ -1,5 +1,6 @@
 # backend/enhanced_news_collector.py (정교한 키워드 사전이 반영된 최종 버전)
 
+import os
 import logging
 import time
 import re
