@@ -1,14 +1,14 @@
-# backend/main.py (백그라운드 작업으로 수정)
+# backend/main.py (백그라운드 작업으로 수정, 디버그 엔드포인트 추가)
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from typing import List, Dict, Optional
 import logging
-import asyncio
+import os # os 모듈 추가
 
 # --- 1. 프로젝트 모듈 import ---
-from database import db
+from database import db, DB_PATH # DB_PATH 추가
 from enhanced_news_collector import collector
 
 # --- 2. 로깅 및 FastAPI 앱 설정 ---
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="News IT's Issue API",
     description="Enhanced IT/Tech News Collection and Analysis Platform",
-    version="2.2.1" # 버전 업데이트
+    version="2.2.2" # 버전 업데이트
 )
 
 app.add_middleware(
@@ -121,7 +121,7 @@ async def remove_favorite(article_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to remove favorite.")
 
-# --- 6. 뉴스 수집 API 수정 (백그라운드 작업) ---
+# --- 6. 뉴스 수집 API --- 
 
 def run_news_collection(max_feeds: Optional[int] = None):
     # 백그라운드에서 실행될 실제 뉴스 수집 함수
@@ -138,6 +138,22 @@ async def collect_news_now(background_tasks: BackgroundTasks, max_feeds: Optiona
     logger.info("🚀 News collection request received. Starting as a background task.")
     background_tasks.add_task(run_news_collection, max_feeds)
     return {"message": "뉴스 수집 작업이 백그라운드에서 시작되었습니다. 완료까지 몇 분 정도 소요될 수 있습니다."}
+
+# --- 7. 디버깅 엔드포인트 추가 ---
+@app.get("/api/debug-info")
+async def debug_info():
+    db_path = DB_PATH
+    db_exists = os.path.exists(db_path)
+    try:
+        article_count = db.execute_query("SELECT COUNT(*) as count FROM articles")[0]['count']
+    except Exception as e:
+        article_count = f"Error: {e}"
+    
+    return {
+        "db_path": db_path,
+        "db_exists": db_exists,
+        "article_count": article_count
+    }
 
 # 로컬 테스트용
 if __name__ == "__main__":
