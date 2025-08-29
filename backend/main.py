@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="News IT's Issue API",
     description="Enhanced IT/Tech News Collection and Analysis Platform",
-    version="2.2.0" # 버전 업데이트
+    version="2.2.1" # 버전 업데이트
 )
 
 app.add_middleware(
@@ -124,7 +124,7 @@ async def remove_favorite(article_id: int):
 # --- 6. 뉴스 수집 API 수정 (백그라운드 작업) ---
 
 def run_news_collection(max_feeds: Optional[int] = None):
-    """백그라운드에서 실행될 실제 뉴스 수집 함수"""
+    # 백그라운드에서 실행될 실제 뉴스 수집 함수
     try:
         logger.info(f"BACKGROUND: Starting news collection (max_feeds={max_feeds})...")
         collector.collect_all_news(max_feeds)
@@ -134,7 +134,7 @@ def run_news_collection(max_feeds: Optional[int] = None):
 
 @app.post("/api/collect-news-now")
 async def collect_news_now(background_tasks: BackgroundTasks, max_feeds: Optional[int] = Query(None)):
-    """뉴스 수집을 백그라운드 작업으로 시작시키는 API"
+    # 뉴스 수집을 백그라운드 작업으로 시작시키는 API
     logger.info("🚀 News collection request received. Starting as a background task.")
     background_tasks.add_task(run_news_collection, max_feeds)
     return {"message": "뉴스 수집 작업이 백그라운드에서 시작되었습니다. 완료까지 몇 분 정도 소요될 수 있습니다."}
