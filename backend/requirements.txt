@@ -21,7 +21,7 @@ requests-cache==1.1.1
 lxml==4.9.3
 
 # Data processing and analysis
-numpy==1.24.4
+numpy==1.26.4
 pandas==2.0.3
 python-dateutil==2.8.2
 
