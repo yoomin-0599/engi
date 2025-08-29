@@ -16,9 +16,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="News IT's Issue API",
+    title="News IT's Issue API (Debug v2.2.3)", # 디버깅을 위해 제목 변경
     description="Enhanced IT/Tech News Collection and Analysis Platform",
-    version="2.2.2" # 버전 업데이트
+    version="2.2.3" # 버전 업데이트
 )
 
 app.add_middleware(
